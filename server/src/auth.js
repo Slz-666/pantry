@@ -1,8 +1,12 @@
 /**
- * 认证插件：/api/auth/login、/api/auth/me，以及全局「默认锁死」守卫。
+ * 认证：/api/auth/login、/api/auth/me，以及根级 requireAuth 守卫。
  *
  * 错误一律 401 且消息相同 —— 不区分「用户不存在」和「密码错误」，
  * 防止通过错误信息枚举账号。
+ *
+ * 注意作用域：Fastify 插件里的 app.decorate 只对该插件作用域及后代可见。
+ * 全局 onRequest 钩子跑在根作用域，所以 requireAuth 必须装饰在根 app 上
+ * （由 index.js 调 registerAuthGuard 完成），本文件只定义路由。
  */
 import bcrypt from 'bcryptjs';
 import { query } from './db.js';
@@ -11,14 +15,8 @@ import { query } from './db.js';
 // 格式必须是合法 bcrypt 结构（$2a$10$ + 53 位 base64），否则 compare 会抛格式错误。
 const DUMMY_HASH = '$2a$10$' + 'x'.repeat(53);
 
-export default async function authPlugin(app) {
-  const { default: jwt } = await import('@fastify/jwt');
-  await app.register(jwt, {
-    secret: process.env.JWT_SECRET,
-    sign: { expiresIn: '7d' },
-  });
-
-  /** 路由守卫：挂 preHandler。没带 token / 过期 / 伪造 → 统一 401。 */
+/** 在根实例上装饰守卫。index.js 里必须在注册路由前调用。 */
+export function registerAuthGuard(app) {
   app.decorate('requireAuth', async (req, reply) => {
     try {
       await req.jwtVerify();
@@ -26,19 +24,9 @@ export default async function authPlugin(app) {
       return reply.code(401).send({ code: 'UNAUTHORIZED', message: '请先登录' });
     }
   });
+}
 
-  /**
-   * 全局默认锁死：/api/* 下除公开路径外，一律需要登录。
-   * 这是 fail-closed —— 之后新加的业务路由不需要记得挂守卫，漏挂也不会裸奔。
-   */
-  await app.register((scoped) => {
-    scoped.addHook('onRequest', async (req, reply) => {
-      const path = (req.raw.url || '').split('?')[0];
-      if (path === '/api/health' || path === '/api/auth/login') return;
-      return app.requireAuth(req, reply);
-    });
-  });
-
+export default async function authRoutes(app) {
   // 登录：用户名 + 密码 → token（7 天有效，自用不做 refresh token）
   app.post('/auth/login', async (req, reply) => {
     const { username, password } = req.body || {};
