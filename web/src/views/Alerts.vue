@@ -9,8 +9,9 @@
  * 后端保证幂等（alert 行锁 + status 判断），重复点不会重复扣。
  */
 import { computed, onMounted, ref } from 'vue';
-import { get, post, newClientOpId } from '../api.js';
-import { pushToast } from '../store.js';
+import { get, newClientOpId } from '../api.js';
+import { pushToast, store } from '../store.js';
+import { submitWrite } from '../offline/sync.js';
 import Empty from '../components/Empty.vue';
 import { expiryClass, expiryText } from '../lib/expiry.js';
 
@@ -22,7 +23,7 @@ const tab = ref('pending');
 const busyId = ref(0);
 
 const TYPE_TEXT = { expire: '到期', opened_expire: '开封后到期', low_stock: '库存不足' };
-const STATUS_TEXT = { done: '已用掉', discarded: '已丢弃', ignored: '已忽略' };
+const STATUS_TEXT = { done: '已用掉', discarded: '已丢弃', ignored: '已忽略', pending_sync: '待同步' };
 
 const pending = computed(() => alerts.value.filter((a) => a.status === 'pending'));
 const handled = computed(() => alerts.value.filter((a) => a.status !== 'pending'));
@@ -43,10 +44,25 @@ async function load() {
 async function handle(a, action) {
   if (busyId.value) return;
   busyId.value = a.id;
+  const body = { action, clientOpId: newClientOpId('alert') };
+  const okText =
+    action === 'done' ? '已用掉 1 个，库存已扣减' : action === 'discard' ? '已丢弃这一批' : '已忽略这条提醒';
   try {
-    await post(`/alerts/${a.id}/handle`, { action, clientOpId: newClientOpId('alert') });
-    pushToast(action === 'done' ? '已用掉 1 个，库存已扣减' : action === 'discard' ? '已丢弃这一批' : '已忽略这条提醒', 'ok');
-    await load();
+    // 断网时先进队列、界面立刻变，联网后自动重放（DEV-PLAN T6.5）
+    const { queued } = await submitWrite({
+      path: `/alerts/${a.id}/handle`,
+      method: 'POST',
+      body,
+      label: okText,
+    });
+    if (queued) {
+      // 乐观更新：本地把这条从待处理里摘掉，服务端稍后确认
+      alerts.value = alerts.value.map((x) => (x.id === a.id ? { ...x, status: 'pending_sync' } : x));
+      pushToast(`${okText}（离线，待同步 ${store.pending} 条）`, 'warn');
+    } else {
+      pushToast(okText, 'ok');
+      await load();
+    }
   } catch {
     // api.js 已经弹过错误提示，这里只负责解锁按钮
   } finally {

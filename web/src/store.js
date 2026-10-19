@@ -15,6 +15,12 @@ export const store = reactive({
   /** 扁平位置表，方便按 id 取名字 */
   locations: [],
   toasts: [],
+  /** 离线态（DEV-PLAN T6.8）：pending=待同步条数，syncing=正在重放，online=浏览器网络状态 */
+  online: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
+  pending: 0,
+  syncing: false,
+  syncError: '',
+  lastSyncAt: 0,
 });
 
 export function setToken(token) {

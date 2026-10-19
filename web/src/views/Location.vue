@@ -7,7 +7,7 @@
  */
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { get } from '../api.js';
+import { getCached } from '../api.js';
 import { store, childLocations } from '../store.js';
 import ItemCard from '../components/ItemCard.vue';
 import Empty from '../components/Empty.vue';
@@ -18,6 +18,8 @@ const router = useRouter();
 const items = ref([]);
 const loading = ref(false);
 const errorText = ref('');
+/** 这一屏是不是缓存数据（离线时给一句说明） */
+const fromCache = ref(false);
 
 const currentId = computed(() => (route.params.id ? Number(route.params.id) : null));
 
@@ -44,13 +46,19 @@ const children = computed(() => childLocations(currentId.value));
 const totalQty = computed(() => items.value.reduce((sum, it) => sum + Number(it.totalQty || 0), 0));
 
 async function load() {
-  loading.value = true;
   errorText.value = '';
+  loading.value = true;
+  const params = currentId.value == null ? {} : { locationId: currentId.value };
   try {
-    items.value = await get('/items', currentId.value == null ? {} : { locationId: currentId.value });
+    // 先给这个位置的缓存、再拉网络覆盖（T6.4）：下钻时不会每次白屏
+    await getCached('/items', params, (data, meta) => {
+      items.value = Array.isArray(data) ? data : [];
+      fromCache.value = Boolean(meta?.cached);
+      loading.value = false;
+    });
   } catch (err) {
     errorText.value = err.message || '加载失败';
-    items.value = [];
+    if (!items.value.length) items.value = [];
   } finally {
     loading.value = false;
   }
@@ -74,6 +82,7 @@ function goParent() {
     </div>
 
     <p v-if="errorText" class="card">{{ errorText }}</p>
+    <p v-if="fromCache && store.online === false" class="muted mb-2">离线：下面是上次同步的数据</p>
 
     <div v-if="children.length" class="section-title"><span>子位置</span></div>
     <div v-if="children.length" class="list">

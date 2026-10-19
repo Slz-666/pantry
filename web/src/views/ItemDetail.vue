@@ -5,7 +5,8 @@
  */
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { get } from '../api.js';
+import { get, getCached } from '../api.js';
+import { store } from '../store.js';
 import BatchRow from '../components/BatchRow.vue';
 import Empty from '../components/Empty.vue';
 
@@ -17,6 +18,8 @@ const batches = ref([]);
 const logs = ref([]);
 const loading = ref(true);
 const errorText = ref('');
+/** 详情是否来自缓存（离线可看，但不保证最新） */
+const fromCache = ref(false);
 
 const TYPE_TEXT = {
   in: '入库',
@@ -28,13 +31,20 @@ const TYPE_TEXT = {
 };
 
 async function load() {
-  loading.value = true;
   errorText.value = '';
   try {
-    const detail = await get(`/items/${itemId.value}`);
-    item.value = detail.item;
-    batches.value = detail.batches ?? [];
-    logs.value = await get('/stock-logs', { itemId: itemId.value, limit: 20 });
+    // 详情走「缓存优先」（T6.4）：断网也能看到上次的批次和流水
+    await getCached(`/items/${itemId.value}`, undefined, (data, meta) => {
+      item.value = data.item;
+      batches.value = data.batches ?? [];
+      fromCache.value = Boolean(meta?.cached);
+      loading.value = false;
+    });
+    try {
+      logs.value = await get('/stock-logs', { itemId: itemId.value, limit: 20 }, { silent: true });
+    } catch {
+      // 流水是次要信息，离线时保留旧值即可
+    }
   } catch (err) {
     errorText.value = err.message || '加载失败';
   } finally {
@@ -53,6 +63,7 @@ function signed(n) {
 <template>
   <div class="detail-page">
     <p v-if="errorText" class="card">{{ errorText }}</p>
+    <p v-if="fromCache && store.online === false" class="muted mb-2">离线：下面是上次同步的数据</p>
     <div v-if="loading" class="empty">加载中…</div>
 
     <template v-else-if="item">

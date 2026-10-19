@@ -4,13 +4,16 @@
  * 数据全部来自 GET /summary/today（聚合接口，一次请求）。
  */
 import { computed, onMounted, ref } from 'vue';
-import { get } from '../api.js';
+import { getCached } from '../api.js';
+import { store } from '../store.js';
 import Empty from '../components/Empty.vue';
 import { expiryClass, expiryText } from '../lib/expiry.js';
 
 const summary = ref(null);
 const loading = ref(true);
 const errorText = ref('');
+/** 这份数据是不是从 IndexedDB 快照来的（离线时给用户一句说明） */
+const fromCache = ref(false);
 
 const stocks = computed(() => summary.value?.stocks ?? {});
 
@@ -29,10 +32,14 @@ const notice = computed(() => {
 });
 
 async function load() {
-  loading.value = true;
   errorText.value = '';
   try {
-    summary.value = await get('/summary/today');
+    // 先给缓存、再拉网络覆盖（DEV-PLAN T6.4）：厨房弱网下这一屏也能立刻出来
+    await getCached('/summary/today', undefined, (data, meta) => {
+      summary.value = data;
+      fromCache.value = Boolean(meta?.cached);
+      loading.value = false;
+    });
   } catch (err) {
     errorText.value = err.message || '加载失败';
   } finally {
@@ -50,6 +57,10 @@ function qtyOf(n) {
 <template>
   <div>
     <p v-if="errorText" class="card">{{ errorText }}</p>
+
+    <p v-if="fromCache && store.online === false" class="muted mt-2">
+      离线：下面是上次同步的数据
+    </p>
 
     <RouterLink v-if="!loading && notice" to="/alerts" class="notice">
       <span class="notice__dot"></span>

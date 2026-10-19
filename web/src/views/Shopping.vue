@@ -11,6 +11,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { get, patch, post, newClientOpId } from '../api.js';
 import { pushToast, store } from '../store.js';
+import { submitWrite } from '../offline/sync.js';
 import Empty from '../components/Empty.vue';
 import Field from '../components/Field.vue';
 import Sheet from '../components/Sheet.vue';
@@ -135,13 +136,19 @@ async function doStock() {
   if (!stock.locationId) return pushToast('先选个位置', 'warn');
   busy.value = true;
   try {
-    await post(`/shopping/${stock.item.id}/stock`, {
-      locationId: Number(stock.locationId),
-      qty: stock.qty || stock.item.qty,
-      expireAt: stock.expireAt || null,
-      clientOpId: newClientOpId('stock'),
+    // 「买回来了」也支持离线：入库操作先进队列，联网后重放（client_op_id 保证只入一次）
+    const { queued } = await submitWrite({
+      path: `/shopping/${stock.item.id}/stock`,
+      method: 'POST',
+      body: {
+        locationId: Number(stock.locationId),
+        qty: stock.qty || stock.item.qty,
+        expireAt: stock.expireAt || null,
+        clientOpId: newClientOpId('stock'),
+      },
+      label: `${stock.item.name} 入库`,
     });
-    pushToast(`${stock.item.name} 已入库`, 'ok');
+    pushToast(queued ? `${stock.item.name} 已入库（离线，待同步 ${store.pending} 条）` : `${stock.item.name} 已入库`, queued ? 'warn' : 'ok');
     stock.open = false;
     await load();
   } catch {

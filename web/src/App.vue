@@ -6,8 +6,9 @@
  */
 import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { store, loadLocations, locationName } from './store.js';
+import { store, loadLocations, locationName, pushToast } from './store.js';
 import { get } from './api.js';
+import { flushQueue, startSync } from './offline/sync.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -67,9 +68,19 @@ function onAuthExpired() {
   router.replace({ name: 'login', query: { redirect: route.fullPath } });
 }
 
+/** 手动同步：成功后给一条反馈，失败（又断网）就等自动触发 */
+async function onSyncClick() {
+  store.syncError = '';
+  const r = await flushQueue();
+  if (r.sent > 0) pushToast(`已同步 ${r.sent} 条`, 'ok');
+  else if (r.remaining > 0) pushToast(store.syncError || '还在离线，等联网后自动同步', 'warn');
+}
+
 onMounted(() => {
   ensureSession();
   window.addEventListener('auth:expired', onAuthExpired);
+  // 离线队列：注册 online/visibilitychange/页面加载/30s 定时四个触发点（DEV-PLAN T6.7）
+  void startSync();
 });
 
 onUnmounted(() => {
@@ -145,6 +156,24 @@ watch(
       </header>
 
       <div class="content">
+        <!-- 离线/待同步状态条（DEV-PLAN T6.8）：只有真的有队列或断网时才出现 -->
+        <div v-if="store.pending > 0 || !store.online" class="sync-bar" :class="{ 'sync-bar--off': !store.online }">
+          <span class="sync-bar__dot"></span>
+          <span class="sync-bar__text">
+            <template v-if="!store.online && store.pending > 0">离线 · 待同步 {{ store.pending }} 条</template>
+            <template v-else-if="!store.online">离线 · 改动会先存在手机上</template>
+            <template v-else-if="store.syncing">正在同步 {{ store.pending }} 条…</template>
+            <template v-else>待同步 {{ store.pending }} 条</template>
+          </span>
+          <button
+            v-if="store.pending > 0 && store.online && !store.syncing"
+            type="button"
+            class="btn btn--sm"
+            @click="onSyncClick"
+          >
+            立即同步
+          </button>
+        </div>
         <RouterView />
       </div>
     </main>
