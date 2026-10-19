@@ -2,6 +2,8 @@ node_modules/
 dist/
 # npm 缓存放在仓库内（本机 DSH 沙箱只允许写工作目录，默认的 %LOCALAPPDATA%\npm-cache 会被拒）
 .cache/
+# 本机 MySQL 独立数据目录（阶段 1 起使用，绝不能进 git）
+data/
 .env
 .env.local
 *.log

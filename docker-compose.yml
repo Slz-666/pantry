@@ -1,0 +1,30 @@
+# Docker 方式起一个独立的 MySQL，映射到 3307，避开本机已有的 3306 实例（那个实例里可能有其他项目的库）。
+# 用法：docker compose up -d     然后 .env 里 DB_PORT=3307
+# 说明：字符集/排序规则显式指定成 utf8mb4，避免中文物品名、emoji 入库时报错。
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: pantry-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: pantry
+      MYSQL_DATABASE: pantry
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    ports:
+      # 宿主机 3307 → 容器 3306
+      - "3307:3306"
+    volumes:
+      # 数据落到命名卷，容器删了库还在
+      - pantry-mysql-data:/var/lib/mysql
+    healthcheck:
+      # 迁移脚本要等 MySQL 真正可连（不是容器起来就算），所以给一个探活
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ppantry"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pantry-mysql-data:
