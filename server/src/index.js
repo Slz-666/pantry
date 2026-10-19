@@ -1,23 +1,25 @@
-// 后端入口：只做「启动 + 注册插件」，业务逻辑一律不进这个文件。
-// 为什么单独一个文件：阶段 2 起会往这里加 routes 注册，保持 index.js 短小，
-// 面试时打开它就能一眼看到整个服务的组成。
-import 'dotenv/config'
-import Fastify from 'fastify'
+import './env.js';
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import authPlugin from './auth.js';
 
-const app = Fastify({ logger: true })
+const app = Fastify({ logger: true });
 
-// 健康检查：不做任何 IO，只证明「进程活着、端口通、路由注册成功」。
-// 阶段 0 的验收就是它，阶段 1 起才会加 db ping。
-app.get('/api/health', async () => ({ ok: true }))
+// 开发期允许 Vite 5173 跨域直连（生产中前端和 API 同源，CORS 只影响开发体验）
+await app.register(cors, { origin: true });
 
-const port = Number(process.env.PORT || 8787)
-// 监听 0.0.0.0 而不是 127.0.0.1：阶段 7 手机要连电脑的局域网 IP，
-// 只听回环地址时手机永远连不上，这个坑提前避开。
-const host = process.env.HOST || '0.0.0.0'
+// 健康检查：部署/监控用，不需要登录
+app.get('/api/health', async () => ({ ok: true }));
+
+// 认证插件挂到 /api 前缀：内部路由 /auth/login、/auth/me，并带全局鉴权钩子
+await app.register(authPlugin, { prefix: '/api' });
+
+const port = Number(process.env.PORT || 8787);
+const host = process.env.HOST || '0.0.0.0';
 
 try {
-  await app.listen({ port, host })
+  await app.listen({ port, host });
 } catch (err) {
-  app.log.error(err)
-  process.exit(1)
+  app.log.error(err);
+  process.exit(1);
 }
