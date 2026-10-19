@@ -56,7 +56,7 @@
 | 7 | 后端 **Node + Fastify + JS(ESM)**，不引 TypeScript | 减少构建环节；用户正在学 JS | 中 |
 | 8 | 迁移 **手写编号 SQL + 20 行脚本**，不引 knex/prisma | 同上，SQL 要能讲 | 低 |
 | 9 | LLM 用 **DeepSeek `deepseek-chat` JSON 模式** | 用户已有 key，中文口述理解好，成本低 | 低 |
-| 10 | 语音**只做安卓 `webkitSpeechRecognition`** | iOS 不支持，用户主用安卓机，已明确 iOS 为非目标 | 低 |
+| 10 | 语音**只做安卓 `webkitSpeechRecognition`** | iOS 不支持，日常主用安卓机，已明确 iOS 为非目标 | 低 |
 | 11 | 定位**自己日常使用**，所以**离线与同步必须做** | 不是演示品，断网要能录入 | 中 |
 | 12 | **必须 HTTPS**（手机端） | PWA 安装、Service Worker、麦克风全都要求安全上下文 | 不可协商 |
 
@@ -83,7 +83,7 @@
 | MySQL | **8.0.46 本机安装版**，路径 `C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe`，**3306 已在监听**（PID 7176） | 见下方「环境注意 1」 |
 | Docker | 29.7.2 可用 | 可作为隔离方案 |
 | 端口 | 3306 / 33060 被 MySQL 占用；**8787（后端）、5173（前端）空闲** | 与 DEV-PLAN 一致，不用改 |
-| 安卓设备 | 安卓机 + Chrome | 语音、PWA 真机测试用 |
+| 安卓设备 | 安卓机（Android 15）+ Chrome | 语音、PWA 真机测试用 |
 
 **环境注意 1：MySQL 的处理方式（重要）**
 本机 3306 上跑着用户自己的 MySQL 8.0 服务，root 密码未知，且可能有其他项目的库。**不要直接往里建库**，两个安全做法：

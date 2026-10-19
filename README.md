@@ -176,6 +176,24 @@ bash server/scripts/smoke.sh
 
 生产形态（手机访问）见 [`docs/deploy.md`](docs/deploy.md)：构建产物由同一进程托管 + 自签 HTTPS。
 
+### 环境变量
+
+复制 `.env.example` 为 `.env`（已在 `.gitignore` 里，**不会**进仓库）。启动时 `server/src/env.js` 显式从仓库根加载。
+
+| 键 | 必填 | 作用 | 缺了会怎样 |
+|---|---|---|---|
+| `DB_HOST` `DB_PORT` `DB_USER` `DB_PASSWORD` `DB_NAME` | 是 | MySQL 连接（示例值 `127.0.0.1:3307` / `pantry`） | 进程启动后第一个查询就失败：`Access denied for user` 或 `ECONNREFUSED` |
+| `JWT_SECRET` | 是 | 签发登录 token（HS256，7 天） | 进程起不来（没有 secret 无法签名） |
+| `DEEPSEEK_KEY` | 录入功能必填 | 调 `deepseek-chat` 抽取字段 | **应用照常启动，其他功能全部可用**：只有 `POST /api/extract` 返回 `{failed:true}`，前端把原话保留、直接退手动填表；`extraction_log` 里记 `status='failed'` 和错误原因，便于排查 |
+| `PORT` `HOST` | 否 | 监听端口 / 地址 | 默认 `8787` / `0.0.0.0`（手机要连局域网，不能只听回环） |
+| `DEEPSEEK_BASE_URL` `DEEPSEEK_MODEL` | 否 | 换代理或换模型 | 默认 `https://api.deepseek.com` / `deepseek-chat` |
+| `EXTRACT_TIMEOUT_MS` `EXTRACT_RETRY` | 否 | 抽取超时与重试次数 | 默认 `15000` / `1`（只在超时、5xx、JSON 非法时重试；4xx 不重试） |
+| `HTTPS_KEY` `HTTPS_CERT` | 否 | 填了就起 HTTPS（手机麦克风 / PWA 安装需要） | 不填走 HTTP，局域网真机访问会**静默拿不到麦克风** |
+| `SEED_ADMIN_PASSWORD` | 否 | `seed.js` 建管理员时的密码 | 默认 `pantry123`，上线前务必改 |
+| `SCAN_INTERVAL_MS` | 否 | 扫提醒的间隔毫秒（开发用） | 不设则只靠每早 8 点的 cron 和手动 `POST /jobs/scan` |
+
+> 没有 `DEEPSEEK_KEY` 时整条链路仍然是可用的：「记一笔」会提示抽取失败并展开手动表单，确认后走 `POST /batches` 直接入库。LLM 是加速器，不是依赖。
+
 ## 8. 验收证据
 
 | 阶段 | 验收内容 | 证据 |
@@ -187,7 +205,7 @@ bash server/scripts/smoke.sh
 | 4 录入 | 20 条测试集 90%、6 条边界行为正确 | `docs/extract-eval.md` |
 | 5 提醒/清单 | 造 3+1 条触发数据 → 扫出 4 条、再扫不变、点「用掉」→ 提醒消失 + 数量 −1 + 流水 +1 | `.cache/p5-check.mjs` |
 | 6 离线 | 断网刷新能开、断网点「用掉」显示「待同步 1 条」、恢复后 `stock_log` 只多 1 条（11/11） | `docs/offline.md`、`docs/screenshots/p6-offline.png` |
-| 7 真机 | 安卓机：语音录入闭环、飞行模式离线同步（PWA 独立窗口受国内 ROM 限制） | `docs/deploy.md` §8 |
+| 7 真机 | 安卓 Chrome：语音录入闭环、飞行模式离线同步（PWA 独立窗口受国内 ROM 限制） | `docs/deploy.md` §8 |
 | 8 作品集 | README / 评测 / 指标 / 面试清单 | 本文件、`docs/metrics.md`、`docs/interview.md` |
 
 指标（真实数据）：抽取成功率 **90.2%**、模型往返中位 **1.12 s**、提醒处理率 **80%**，见 [`docs/metrics.md`](docs/metrics.md)。
@@ -226,7 +244,7 @@ docs/  schema.md · extract-eval.md · offline.md · deploy.md · metrics.md · 
 
 ## 11. 已知限制（诚实清单）
 
-- **语音只支持安卓 Chrome**（`webkitSpeechRecognition`），iOS Safari 不支持——真机主用安卓机
+- **语音只支持安卓 Chrome**（`webkitSpeechRecognition`），iOS Safari 不支持，且必须在 HTTPS 或 localhost 下才会请求麦克风权限
 - **PWA 独立窗口在国内 ROM 上装不出来**：无 GMS 时 WebAPK 不落地，退回快捷方式（功能不受影响，见 `docs/deploy.md` §8）
 - **冲突策略是 LWW**（`updated_at` 新的赢），不做字段级合并；离线队列不重基，冲突时按业务错误出队并提示
 - **单用户自用**：`tenant_id`/`member` 结构按多租户设计，但没有权限体系、没有审阅流
@@ -243,3 +261,7 @@ docs/  schema.md · extract-eval.md · offline.md · deploy.md · metrics.md · 
 | [`docs/deploy.md`](docs/deploy.md) | 部署、自签 HTTPS、手机装 CA、真机验收记录 |
 | [`docs/metrics.md`](docs/metrics.md) | 三个核心指标的 SQL 口径 |
 | [`docs/interview.md`](docs/interview.md) | 面试问答（7 题 + 追问） |
+
+## License
+
+[MIT](LICENSE) © 2026 家里有什么 (pantry) contributors
