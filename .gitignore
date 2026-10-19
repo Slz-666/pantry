@@ -1,0 +1,10 @@
+node_modules/
+dist/
+# npm 缓存放在仓库内（本机 DSH 沙箱只允许写工作目录，默认的 %LOCALAPPDATA%\npm-cache 会被拒）
+.cache/
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+.workbuddy/
