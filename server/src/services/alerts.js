@@ -9,6 +9,7 @@
  * - 规则来自 reminder_rule（按分类），没有规则的分类用默认值兜底。
  */
 import { query } from '../db.js';
+import { jsonArray } from '../lib/json.js';
 
 const DEFAULT_DAYS = [30, 7, 1, 0]; // 到期前 30/7/1/0 天提醒
 const DEFAULT_OPENED_DAYS = 30; // 开封后 30 天提醒
@@ -34,12 +35,12 @@ async function loadRules(tenantId) {
   );
   const map = new Map();
   for (const r of rows) {
+    // JSON 列已被驱动解析成数组；用 jsonArray 兼容两种返回，避免规则静默失效
+    const arr = jsonArray(r.days_before);
     let days = DEFAULT_DAYS;
-    try {
-      const arr = JSON.parse(r.days_before ?? 'null');
-      if (Array.isArray(arr) && arr.length) days = arr.map(Number).filter(Number.isFinite);
-    } catch {
-      // 规则写坏了就用默认值，不要让扫描整个失败
+    if (arr.length) {
+      const nums = arr.map(Number).filter(Number.isFinite);
+      if (nums.length) days = nums;
     }
     map.set(r.category, {
       days,

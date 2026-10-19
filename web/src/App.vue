@@ -54,7 +54,9 @@ async function ensureSession() {
     /* 位置树加载失败不阻塞页面，具体页会各自报错 */
   }
   try {
-    store.member = await get('/auth/me', undefined, { silent: true });
+    // 后端 /auth/me 返回 { member: {...} }；这里兼容「有包装」和「直接返回成员」两种形状
+    const me = await get('/auth/me', undefined, { silent: true });
+    store.member = me?.member ?? me ?? null;
   } catch {
     /* /auth/me 失败说明 token 无效，api 层已经处理跳登录 */
   }

@@ -1348,3 +1348,41 @@ select.input {
   cursor: pointer;
   padding-right: var(--sp-2);
 }
+
+/* 提醒规则行（设置页）：一条品类一行，展开成两个输入框 */
+.rule {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.rule:last-child {
+  border-bottom: 0;
+}
+
+.rule--new {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-border);
+  border-bottom: 0;
+}
+
+.rule__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.rule__head .row__title {
+  flex: 1;
+}
+
+.rule__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-2);
+  color: var(--c-text-2);
+}

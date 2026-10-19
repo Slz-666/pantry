@@ -167,6 +167,14 @@ SUG_IS_ARRAY=$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/shopping/sug
 expect "${SUG_IS_ARRAY:-no}" yes "GET /shopping/suggestions 返回数组"
 expect "$(post_json "$BASE/api/shopping" "{\"name\":\"冒烟测试来源-$-\",\"qty\":1,\"unit\":\"个\",\"source\":\"bad_source\",\"clientOpId\":\"badsrc-$$-$(date +%s)\"}")" 400 "清单项来源非白名单 → 400"
 
+# 阶段 5 补：提醒规则（只读列表 + 非法入参不改真实数据）
+expect "$(code_of "$BASE/api/reminder-rules")" 200 "GET /api/reminder-rules 返回规则列表"
+RULE_ID=$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/reminder-rules" | "$NODE" -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{const a=JSON.parse(d);console.log(a[0]?.id??"")}catch(e){console.log("")}})')
+[ -n "$RULE_ID" ] && ok "读到规则 id=$RULE_ID" || bad "规则列表为空"
+RULE_BAD=$(curl -s -o "$TMP/rule.json" -w '%{http_code}' -X PATCH "$BASE/api/reminder-rules/$RULE_ID" \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" --data-binary '{"daysBefore":[-1]}')
+expect "$RULE_BAD" 400 "提醒规则非法节点 → 400（不改动真实规则）"
+
 echo
 echo "== 7. 录入 Agent（一句话抽草稿 / 非录入被拒） =="
 expect "$(code_of "$BASE/api/meta")" 200 "GET /api/meta 返回单位/分类白名单"

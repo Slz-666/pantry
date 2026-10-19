@@ -14,6 +14,7 @@
  */
 import { query, withTransaction } from '../db.js';
 import { fail } from '../lib/http.js';
+import { jsonArray } from '../lib/json.js';
 import { OpError, stockInTx } from '../services/inventory.js';
 import { extractRaw } from '../services/extract.js';
 import { addDays, addMonths, isValidDate, normalizeDraft, todayString } from '../services/normalize.js';
@@ -38,15 +39,13 @@ async function loadContext(tenantId) {
 
   return {
     locations: locations.map((r) => ({ id: r.id, name: r.name, parentId: r.parent_id })),
-    items: itemRows.map((r) => {
-      let aliases = [];
-      try {
-        aliases = r.aliases ? JSON.parse(r.aliases) : [];
-      } catch {
-        aliases = [];
-      }
-      return { id: r.id, name: r.name, spec: r.spec, aliases };
-    }),
+    items: itemRows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      spec: r.spec,
+      // JSON 列已由驱动解析成数组，直接用 jsonArray 兼容两种返回
+      aliases: jsonArray(r.aliases),
+    })),
     batches: batchRows.map((r) => ({
       id: r.id,
       itemId: r.item_id,
@@ -202,7 +201,10 @@ export default async function extractRoutes(app) {
           const unit = it.unit ? String(it.unit).trim() : null;
           if (!unit) throw new OpError(400, 'BAD_REQUEST', `「${name}」没选单位`);
 
-          // 复用已有物品：前端传了 itemId 就用它；否则按 名称+规格 找；再没有才新建
+          // 复用已有物品（方案 A：同名即复用，不再产生「酸奶」和「酸奶 100g」两条档案）。
+          // item 表的唯一键是 (tenant_id, name_key)，name_key 含 spec，所以数据库允许同名多规格并存；
+          // 但站在用户角度「酸奶」就是一罐酸奶，规格写没写齐不该变成两样东西。
+          // 同名有多条时优先挑 spec 完全一致的那条（`<=>` 是 NULL 安全等值），否则挑最早建的。
           let itemId = Number(it.itemId) || null;
           if (itemId) {
             const [found] = await conn.execute(
@@ -213,11 +215,22 @@ export default async function extractRoutes(app) {
           } else {
             const spec = it.spec ? String(it.spec).trim() : null;
             const [same] = await conn.execute(
-              'SELECT id FROM item WHERE tenant_id = ? AND name = ? AND ((spec IS NULL AND ? IS NULL) OR spec = ?) AND deleted_at IS NULL LIMIT 1',
-              [tenant, name, spec, spec],
+              `SELECT id FROM item
+                WHERE tenant_id = ? AND name = ? AND deleted_at IS NULL
+                ORDER BY (spec <=> ?) DESC, id
+                LIMIT 1`,
+              [tenant, name, spec],
             );
             if (same.length) {
               itemId = same[0].id;
+              // 老档案没填规格、这次说了规格：顺手补上，避免信息永远丢
+              if (spec) {
+                await conn.execute('UPDATE item SET spec = COALESCE(spec, ?) WHERE id = ? AND tenant_id = ?', [
+                  spec,
+                  itemId,
+                  tenant,
+                ]);
+              }
             } else {
               const [ins] = await conn.execute(
                 `INSERT INTO item (tenant_id, name, spec, unit, category, aliases, default_location_id, note)

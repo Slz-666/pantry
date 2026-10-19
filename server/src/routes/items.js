@@ -10,6 +10,7 @@
  */
 import { query } from '../db.js';
 import { fail } from '../lib/http.js';
+import { jsonArray } from '../lib/json.js';
 import { subtreeIds } from './locations.js';
 // 单位/分类白名单只有一份（在 normalize.js）：录入校验和手工编辑必须同一套标准，
 // 否则会出现「Agent 能录进去、手工改不回来」的割裂。
@@ -36,13 +37,9 @@ function toItem(row) {
   };
 }
 
+/** 兼容旧字段：aliases 是 JSON 列，mysql2 直接给数组，字符串老数据也要能读 */
 function safeJson(text) {
-  if (text == null) return [];
-  try {
-    return JSON.parse(text);
-  } catch {
-    return [];
-  }
+  return jsonArray(text);
 }
 
 function validUnit(unit) {

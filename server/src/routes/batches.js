@@ -127,8 +127,8 @@ export default async function batchRoutes(app) {
    * - 有 itemId：物品已经存在（例如从物品详情页「再买一次」）；
    * - 没有 itemId 但有 name：手动录入的路径。物品还不存在就先建档，
    *   建档和入库在同一个事务里，失败一起回滚，不会留下没人认领的空物品。
-   *   item 的唯一键是 (tenant_id, name_key)，name_key = name|spec，所以同名不同规格
-   *   会被当成两个物品——这跟搜索、展示的口径一致。
+   *   匹配口径（方案 A）：同名即复用，规格只在多条同名里挑最接近的那条，
+   *   不让「写了规格 / 没写规格」变成两条档案。
    */
   app.post('/batches', async (req, reply) => {
     const body = req.body || {};
@@ -161,12 +161,14 @@ export default async function batchRoutes(app) {
       const spec = body.spec ? String(body.spec).trim().slice(0, 32) : null;
       const unit = body.unit ? String(body.unit) : '个';
       const category = body.category || null;
-      const nameKey = `${name}|${spec || ''}`;
 
       const out = await runWrite(tenantId, body.clientOpId, async (conn) => {
         let [rows] = await conn.execute(
-          'SELECT id FROM item WHERE tenant_id = ? AND name_key = ? AND deleted_at IS NULL',
-          [tenantId, nameKey],
+          `SELECT id FROM item
+            WHERE tenant_id = ? AND name = ? AND deleted_at IS NULL
+            ORDER BY (spec <=> ?) DESC, id
+            LIMIT 1`,
+          [tenantId, name, spec],
         );
         let itemId = rows[0]?.id;
         if (!itemId) {
@@ -180,8 +182,11 @@ export default async function batchRoutes(app) {
             // 并发建同名物品：唯一键挡住后重新取一次，接着入库即可
             if (err.code !== 'ER_DUP_ENTRY') throw err;
             [rows] = await conn.execute(
-              'SELECT id FROM item WHERE tenant_id = ? AND name_key = ?',
-              [tenantId, nameKey],
+              `SELECT id FROM item
+                WHERE tenant_id = ? AND name = ? AND deleted_at IS NULL
+                ORDER BY (spec <=> ?) DESC, id
+                LIMIT 1`,
+              [tenantId, name, spec],
             );
             itemId = rows[0]?.id;
             if (!itemId) throw err;

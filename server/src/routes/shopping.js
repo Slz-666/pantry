@@ -269,12 +269,12 @@ export default async function shoppingRoutes(app) {
         }
         if (item.status !== 'pending') throw new OpError(409, 'CONFLICT', '该清单项已取消，不能再入库');
 
-        // 找物品档案：没关联就按名字找，找不到就建
+        // 找物品档案：没关联就按名字找（方案 A：同名即复用，不区分规格），找不到才建档
         let itemId = item.item_id;
         if (!itemId) {
           const [found] = await conn.execute(
-            'SELECT id FROM item WHERE tenant_id = ? AND name_key = ? AND deleted_at IS NULL',
-            [tenantId, `${item.name}|`],
+            'SELECT id FROM item WHERE tenant_id = ? AND name = ? AND deleted_at IS NULL ORDER BY id LIMIT 1',
+            [tenantId, item.name],
           );
           if (found.length) {
             itemId = found[0].id;

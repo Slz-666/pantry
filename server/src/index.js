@@ -15,6 +15,7 @@ import alertRoutes from './routes/alerts.js';
 import summaryRoutes from './routes/summary.js';
 import extractRoutes from './routes/extract.js';
 import metaRoutes from './routes/meta.js';
+import reminderRoutes from './routes/reminders.js';
 
 const app = Fastify({ logger: true });
 
@@ -78,6 +79,7 @@ await app.register(alertRoutes, { prefix: '/api' });
 await app.register(summaryRoutes, { prefix: '/api' });
 await app.register(extractRoutes, { prefix: '/api' });
 await app.register(metaRoutes, { prefix: '/api' });
+await app.register(reminderRoutes, { prefix: '/api' });
 
 /**
  * T5.1 每天早 8:00 扫一遍提醒（到期 / 开封后到期 / 低库存）。
