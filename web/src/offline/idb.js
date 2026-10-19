@@ -9,9 +9,15 @@
  */
 import { createStore, del, get, keys, set } from 'idb-keyval';
 
-const DB = 'pantry-offline';
-export const cacheStore = createStore(DB, 'cache');
-export const queueStore = createStore(DB, 'queue');
+/**
+ * 注意：cache 与 queue 必须是**两个独立的数据库**，不能共用同一个库名。
+ * idb-keyval 的 createStore 靠 onupgradeneeded 建 object store，而同一个库名只有第一次打开
+ * 会触发升级；两个 createStore 并发打开同一个库时，第二个 store 大概率建不出来，
+ * 之后一读就报 "One of the specified object stores was not found"。
+ * 这个 bug 在 https 真机验证时抓到的（`.cache/p7-https.mjs`）。
+ */
+export const cacheStore = createStore('pantry-cache', 'cache');
+export const queueStore = createStore('pantry-queue', 'queue');
 
 /** 写快照（带时间戳，方便界面上显示「刚才/几分钟前」） */
 export async function putCache(key, value) {

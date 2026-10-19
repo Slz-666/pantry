@@ -1,7 +1,11 @@
 import './env.js';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
+import fastifyStatic from '@fastify/static';
 import cron from 'node-cron';
 import { query } from './db.js';
 import { scanAlerts } from './services/alerts.js';
@@ -17,7 +21,31 @@ import extractRoutes from './routes/extract.js';
 import metaRoutes from './routes/meta.js';
 import reminderRoutes from './routes/reminders.js';
 
-const app = Fastify({ logger: true });
+/**
+ * 生产形态（HANDOFF 阶段 7 / DEV-PLAN T7.2、T7.3）：
+ * 1) 前端构建产物交给本进程托管，前端与 API 同源——少一个 nginx 容器，也不用配 CORS/反代；
+ * 2) HTTPS_CERT + HTTPS_KEY 存在时用 https 起服务：PWA 安装、Service Worker、麦克风都要求安全上下文，
+ *    手机走 http://192.168.x.x 时语音按钮会静默失效（HANDOFF §9 已知坑）。
+ */
+const here = path.dirname(fileURLToPath(import.meta.url));
+const webDist = process.env.WEB_DIST || path.resolve(here, '../../web/dist');
+const hasWebDist = existsSync(path.join(webDist, 'index.html'));
+
+const httpsCert = process.env.HTTPS_CERT;
+const httpsKey = process.env.HTTPS_KEY;
+const useHttps = Boolean(httpsCert && httpsKey);
+
+const app = Fastify({
+  logger: true,
+  ...(useHttps
+    ? {
+        https: {
+          cert: readFileSync(httpsCert),
+          key: readFileSync(httpsKey),
+        },
+      }
+    : {}),
+});
 
 // 开发期允许 Vite 5173 跨域直连（生产中前端和 API 同源，CORS 只影响开发体验）
 await app.register(cors, { origin: true });
@@ -65,9 +93,18 @@ app.setErrorHandler((err, req, reply) => {
 });
 
 // 不存在的接口也返回统一格式，而不是 Fastify 默认的 { error, message }
+// 有前端产物时，非 /api 的 GET 交给 SPA（刷新 /item/42 这类深链接不会 404）
 app.setNotFoundHandler((req, reply) => {
-  reply.code(404).send({ code: 'NOT_FOUND', message: `接口不存在：${req.method} ${req.url}` });
+  if (hasWebDist && req.method === 'GET' && !req.url.startsWith('/api')) {
+    return reply.sendFile('index.html');
+  }
+  return reply.code(404).send({ code: 'NOT_FOUND', message: `接口不存在：${req.method} ${req.url}` });
 });
+
+// 静态产物：/sw.js、/manifest.json、/icons/*、/assets/* 都由它送出（带正确的 MIME 与缓存头）
+if (hasWebDist) {
+  await app.register(fastifyStatic, { root: webDist, prefix: '/' });
+}
 
 // 认证与业务路由
 await app.register(authRoutes, { prefix: '/api' });
@@ -116,11 +153,12 @@ if (scanMs > 0) {
   }, scanMs).unref();
 }
 
-const port = Number(process.env.PORT || 8787);
+const port = Number(process.env.HTTPS_PORT || process.env.PORT || (useHttps ? 8443 : 8787));
 const host = process.env.HOST || '0.0.0.0';
 
 try {
   await app.listen({ port, host });
+  if (hasWebDist) app.log.info({ webDist }, 'serving web build');
 } catch (err) {
   app.log.error(err);
   process.exit(1);

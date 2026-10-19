@@ -10,3 +10,6 @@ data/
 .DS_Store
 Thumbs.db
 .workbuddy/
+
+# 本地自签证书（阶段 7，只在部署机生成，绝不入库）
+certs/
