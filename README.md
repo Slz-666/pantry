@@ -264,4 +264,4 @@ docs/  schema.md · extract-eval.md · offline.md · deploy.md · metrics.md · 
 
 ## License
 
-[MIT](LICENSE) © 2026 家里有什么 (pantry) contributors
+[MIT](LICENSE) © 2026 [slz-666](https://github.com/slz-666)

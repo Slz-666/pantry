@@ -22,7 +22,7 @@
 | `DEV-PLAN.md` | 阶段 0–8 的任务表（T 编号）+ 每阶段验收命令 + CHECKPOINT 门禁 | 每做一个阶段看一节 |
 | 本文 `HANDOFF.md` | 决策锁定、环境实况、硬规则、已知坑、协作约定 | 开工前 + 卡住时 |
 
-`docs/` 下两份是选题调研历史（`2026-10-19-MySQL-Agent-选题清单.md`、`2026-10-19-家里有什么-功能清单.md`），**只作背景，不作为开发依据**。如与 PRD 冲突，以 PRD 为准。
+选题调研的两份历史文档（MySQL-Agent 选题清单、功能清单）已在发布前从仓库移除，仅当本地背景资料；开发依据只有 PRD / DEV-PLAN / 本文。
 
 ---
 
@@ -317,7 +317,7 @@ git init
 | `PRD.md` | 需求唯一来源。功能冲突以它为准 |
 | `DEV-PLAN.md` | 执行唯一来源。任务顺序以它为准 |
 | `HANDOFF.md`（本文） | 决策与环境唯一来源。与上两者冲突时，**本文优先**（因为它记录的是最新核对结果） |
-| `docs/*选题清单*` `docs/*功能清单*` | 历史调研，仅背景 |
+| `docs/schema.md` `docs/extract-eval.md` `docs/offline.md` `docs/deploy.md` `docs/metrics.md` `docs/interview.md` | 各阶段验收与设计记录 |
 
 | 日期 | 变更 |
 |---|---|
