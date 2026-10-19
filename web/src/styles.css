@@ -1206,6 +1206,15 @@ button {
   padding: var(--sp-1) var(--sp-4);
 }
 
+/* 卡片内的行不再自己画边框，避免「框里套框」 */
+.card--flush .row {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+
 .row--tight {
   gap: var(--sp-2);
 }
@@ -1230,4 +1239,112 @@ button {
   .detail-page {
     max-width: 780px;
   }
+}
+
+/* ============================================================
+ * 阶段 5：提醒中心 / 购物清单新增件
+ * ============================================================ */
+
+/* 首页顶部「今天该干什么」一句话 */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--c-primary-soft);
+  border-radius: var(--r-2);
+  background: var(--c-primary-softer);
+  color: var(--c-primary-strong);
+  font-size: var(--fs-2);
+  font-weight: 500;
+  line-height: 1.4;
+  text-decoration: none;
+}
+
+.notice:hover,
+.notice:active {
+  border-color: var(--c-primary);
+}
+
+.notice--ok {
+  border-color: var(--c-border);
+  background: var(--c-surface-2);
+  color: var(--c-text-2);
+}
+
+.notice__dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-round);
+  background: var(--c-warn);
+}
+
+.notice--ok .notice__dot {
+  background: var(--c-ok);
+}
+
+/* 分段切换（提醒中心：待处理 / 已处理） */
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  margin-bottom: var(--sp-3);
+  padding: 3px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-round);
+  background: var(--c-surface-3);
+}
+
+.segmented__item {
+  padding: 6px var(--sp-4);
+  border: 0;
+  border-radius: var(--r-round);
+  background: transparent;
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: var(--fs-2);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.segmented__item:hover {
+  color: var(--c-text);
+}
+
+.segmented__item.is-active {
+  background: var(--c-surface);
+  color: var(--c-primary-strong);
+}
+
+/* 卡片内的操作按钮行（提醒：用掉/丢弃/忽略） */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+
+.card--flush .row-actions {
+  padding: 0 0 var(--sp-2);
+}
+
+/* 两列字段（数量 + 单位 / 数量 + 到期日） */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+}
+
+/* 行右侧放一组按钮时不要挤成一条 */
+.row__side--wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* 下拉框沿用 .input 的外观，光标提示可点 */
+select.input {
+  cursor: pointer;
+  padding-right: var(--sp-2);
 }

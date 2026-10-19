@@ -14,6 +14,8 @@ import { OpError, requireClientOpId, qty2, stockInTx } from '../services/invento
 import { UNIT_LIST } from './items.js';
 
 const STATUS_LIST = ['pending', 'bought', 'cancelled'];
+/** 来源只允许这三种：手动 / 低库存建议采纳 / 提醒带出来的 */
+const SOURCE_LIST = ['manual', 'low_stock', 'alert'];
 
 function toShopping(row) {
   return {
@@ -53,6 +55,77 @@ export default async function shoppingRoutes(app) {
     return rows.map(toShopping);
   });
 
+  /**
+   * T5.6 补货建议：低库存 + 已过期，**先进「待确认」区，不自动进清单**。
+   * 为什么不直接写 shopping_item：建议是「算出来的」，会随库存变化；
+   * 落库就会留下过期建议，还得再写清理逻辑。这里每次实时算，用户点「加进清单」才落库。
+   * 已在待买清单里的物品不再重复建议（按 item_id 或同名判断）。
+   */
+  app.get('/shopping/suggestions', async (req) => {
+    const tenantId = req.user.tenantId;
+
+    const pending = await query(
+      "SELECT item_id, name FROM shopping_item WHERE tenant_id = ? AND status = 'pending'",
+      [tenantId],
+    );
+    const skipIds = new Set(pending.filter((p) => p.item_id != null).map((p) => Number(p.item_id)));
+    const skipNames = new Set(pending.map((p) => p.name));
+
+    // 低库存：设了补货线的物品，当前有效批次总量 ≤ 补货线
+    const low = await query(
+      `SELECT i.id, i.name, i.unit, i.low_stock_threshold, COALESCE(SUM(b.qty), 0) AS total
+         FROM item i
+         LEFT JOIN batch b
+           ON b.item_id = i.id AND b.tenant_id = i.tenant_id AND b.status = 'active'
+        WHERE i.tenant_id = ? AND i.deleted_at IS NULL AND i.low_stock_threshold IS NOT NULL
+        GROUP BY i.id, i.name, i.unit, i.low_stock_threshold
+       HAVING total <= i.low_stock_threshold
+        ORDER BY (i.low_stock_threshold - total) DESC`,
+      [tenantId],
+    );
+
+    // 已过期：还有剩余数量的过期批次（过期的直接换新，也该补）
+    const expired = await query(
+      `SELECT i.id, i.name, i.unit, COUNT(*) AS expired_batches, MIN(b.expire_at) AS first_expired
+         FROM item i
+         JOIN batch b
+           ON b.item_id = i.id AND b.tenant_id = i.tenant_id AND b.status = 'active'
+        WHERE i.tenant_id = ? AND i.deleted_at IS NULL
+          AND b.qty > 0 AND b.expire_at IS NOT NULL AND b.expire_at < CURDATE()
+        GROUP BY i.id, i.name, i.unit
+        ORDER BY first_expired`,
+      [tenantId],
+    );
+
+    const out = [];
+    for (const r of low) {
+      if (skipIds.has(Number(r.id)) || skipNames.has(r.name)) continue;
+      const gap = Number(r.low_stock_threshold) - Number(r.total);
+      out.push({
+        key: `low-${r.id}`,
+        itemId: r.id,
+        name: r.name,
+        unit: r.unit,
+        qty: Math.max(1, Math.ceil(gap)),
+        reason: 'low_stock',
+        detail: `只剩 ${Number(r.total)} ${r.unit}，低于补货线 ${Number(r.low_stock_threshold)}`,
+      });
+    }
+    for (const r of expired) {
+      if (skipIds.has(Number(r.id)) || skipNames.has(r.name)) continue;
+      out.push({
+        key: `exp-${r.id}`,
+        itemId: r.id,
+        name: r.name,
+        unit: r.unit,
+        qty: 1,
+        reason: 'expired',
+        detail: `${r.expired_batches} 个批次已过期（最早 ${r.first_expired}）`,
+      });
+    }
+    return out;
+  });
+
   app.post('/shopping', async (req, reply) => {
     const body = req.body || {};
     const tenantId = req.user.tenantId;
@@ -66,6 +139,22 @@ export default async function shoppingRoutes(app) {
       const qty = qty2(body.qty ?? 1, 'qty');
       if (Number(qty) <= 0) return fail(reply, 400, 'BAD_REQUEST', '数量必须大于 0');
 
+      const source = String(body.source ?? 'manual');
+      if (!SOURCE_LIST.includes(source)) {
+        return fail(reply, 400, 'BAD_REQUEST', `来源只能是：${SOURCE_LIST.join('/')}`);
+      }
+      // itemId 是可选的「关联物品档案」，给了就必须是本租户还没删的
+      let itemId = null;
+      if (body.itemId != null) {
+        itemId = Number(body.itemId);
+        if (!Number.isInteger(itemId) || itemId <= 0) return fail(reply, 400, 'BAD_REQUEST', 'itemId 不合法');
+        const own = await query('SELECT id FROM item WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL', [
+          itemId,
+          tenantId,
+        ]);
+        if (!own.length) return fail(reply, 400, 'BAD_REQUEST', '关联的物品不存在');
+      }
+
       // 幂等：同一个 client_op_id 重放时返回已存在的那条
       const existing = await query(
         'SELECT id FROM shopping_item WHERE tenant_id = ? AND client_op_id = ?',
@@ -77,7 +166,7 @@ export default async function shoppingRoutes(app) {
         const res = await query(
           `INSERT INTO shopping_item (tenant_id, item_id, name, qty, unit, source, client_op_id, note)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [tenantId, body.itemId ?? null, name, qty, unit, body.source ?? 'manual', clientOpId, body.note ?? null],
+          [tenantId, itemId, name, qty, unit, source, clientOpId, body.note ?? null],
         );
         return reply.code(201).send({ id: res.insertId });
       } catch (err) {

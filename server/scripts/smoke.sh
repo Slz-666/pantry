@@ -162,6 +162,11 @@ expect "$(has_alert "$ALERT_ID")" no "提醒已从 pending 列表消失"
 expect "$(post_json "$BASE/api/alerts/$ALERT_ID/handle" "{\"action\":\"done\",\"clientOpId\":\"hagain-$$\"}")" 200 "重复处理同一提醒 → 200（幂等）"
 expect "$(qty_of "$EXP_BATCH")" 4 "重复处理不再扣库存（仍 4）"
 
+# 阶段 5：补货建议（T5.6）——建议是实时算出来的，不自动写进清单
+SUG_IS_ARRAY=$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/shopping/suggestions" | "$NODE" -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(Array.isArray(JSON.parse(d))?"yes":"no")}catch(e){console.log("no")}})')
+expect "${SUG_IS_ARRAY:-no}" yes "GET /shopping/suggestions 返回数组"
+expect "$(post_json "$BASE/api/shopping" "{\"name\":\"冒烟测试来源-$-\",\"qty\":1,\"unit\":\"个\",\"source\":\"bad_source\",\"clientOpId\":\"badsrc-$$-$(date +%s)\"}")" 400 "清单项来源非白名单 → 400"
+
 echo
 echo "== 7. 录入 Agent（一句话抽草稿 / 非录入被拒） =="
 expect "$(code_of "$BASE/api/meta")" 200 "GET /api/meta 返回单位/分类白名单"

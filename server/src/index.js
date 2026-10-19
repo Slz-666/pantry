@@ -2,6 +2,9 @@ import './env.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
+import cron from 'node-cron';
+import { query } from './db.js';
+import { scanAlerts } from './services/alerts.js';
 import { registerAuthGuard } from './auth.js';
 import authRoutes from './auth.js';
 import locationRoutes from './routes/locations.js';
@@ -76,13 +79,38 @@ await app.register(summaryRoutes, { prefix: '/api' });
 await app.register(extractRoutes, { prefix: '/api' });
 await app.register(metaRoutes, { prefix: '/api' });
 
-// 生产用定时扫描：每分钟检查一次提醒（本地 dev 不一定要跑，但起来也无害）。
-// 用 unref 的 interval，不让它拖住进程退出。
+/**
+ * T5.1 每天早 8:00 扫一遍提醒（到期 / 开封后到期 / 低库存）。
+ * 为什么可以放心重复跑：alert 表有 (batch_id, type, due_date) 唯一键，
+ * 扫描用 INSERT IGNORE，跑 100 次和跑 1 次数结果一样——不需要「上次扫到哪」的状态。
+ * 多租户结构上是对的，所以按 tenant 表逐个扫（个人版实际只有 id=1）。
+ */
+async function scanAllTenants(reason) {
+  const tenants = await query('SELECT id FROM tenant');
+  const total = { expire: 0, opened: 0, lowStock: 0 };
+  for (const t of tenants) {
+    const r = await scanAlerts(t.id);
+    total.expire += r.expire ?? 0;
+    total.opened += r.opened ?? 0;
+    total.lowStock += r.lowStock ?? 0;
+  }
+  app.log.info({ reason, ...total }, 'alert scan done');
+  return total;
+}
+
+cron.schedule(
+  '0 8 * * *',
+  () => {
+    scanAllTenants('cron-8am').catch((err) => app.log.error({ err }, 'daily alert scan failed'));
+  },
+  { timezone: 'Asia/Shanghai' },
+);
+
+// 开发期可选的高频扫描（SCAN_INTERVAL_MS>0 才开），生产用上面的 cron 就够
 const scanMs = Number(process.env.SCAN_INTERVAL_MS || 0);
 if (scanMs > 0) {
-  const { scanAlerts } = await import('./services/alerts.js');
   setInterval(() => {
-    scanAlerts(1).catch((err) => app.log.error({ err }, 'scan failed'));
+    scanAllTenants('interval').catch((err) => app.log.error({ err }, 'scan failed'));
   }, scanMs).unref();
 }
 

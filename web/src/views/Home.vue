@@ -14,6 +14,20 @@ const errorText = ref('');
 
 const stocks = computed(() => summary.value?.stocks ?? {});
 
+/**
+ * T5.4 首页顶部一句话：把「今天该干什么」压缩成一屏可见的一句。
+ * 不给数字堆砌，只说用户下一步要动的东西；全 0 时给一句正向反馈。
+ */
+const notice = computed(() => {
+  const s = stocks.value;
+  const parts = [];
+  if (s.expiredCount) parts.push(`${s.expiredCount} 个批次已过期`);
+  if (s.expiringCount) parts.push(`${s.expiringCount} 个 7 天内到期`);
+  if (s.pendingAlertCount) parts.push(`${s.pendingAlertCount} 条提醒待处理`);
+  if (s.pendingShoppingCount) parts.push(`清单还有 ${s.pendingShoppingCount} 样要补`);
+  return parts.join(' · ');
+});
+
 async function load() {
   loading.value = true;
   errorText.value = '';
@@ -36,6 +50,15 @@ function qtyOf(n) {
 <template>
   <div>
     <p v-if="errorText" class="card">{{ errorText }}</p>
+
+    <RouterLink v-if="!loading && notice" to="/alerts" class="notice">
+      <span class="notice__dot"></span>
+      <span class="grow">{{ notice }}</span>
+      <span>去处理 →</span>
+    </RouterLink>
+    <p v-else-if="!loading" class="notice notice--ok">
+      <span class="notice__dot"></span>家里东西都在保质期内，清单也空着 👍
+    </p>
 
     <div class="stats">
       <div class="stat">

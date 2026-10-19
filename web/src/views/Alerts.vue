@@ -1,28 +1,56 @@
 <script setup>
 /**
- * 提醒页（阶段 5 完善）。现在只读展示待处理提醒，
- * 一键处理（用掉 / 丢弃 / 忽略）在阶段 5 接上——后端 /alerts/:id/handle 已经就绪。
+ * 提醒中心（T5.7）：待办 / 已处理两栏。
+ *
+ * 三个动作都走 POST /alerts/:id/handle：
+ * - done：扣 1 个单位并写流水（一次点一个，家里「喝了一盒牛奶」的粒度）
+ * - discard：把这个批次剩余全部丢掉
+ * - ignore：只关提醒，不动库存
+ * 后端保证幂等（alert 行锁 + status 判断），重复点不会重复扣。
  */
-import { onMounted, ref } from 'vue';
-import { get } from '../api.js';
+import { computed, onMounted, ref } from 'vue';
+import { get, post, newClientOpId } from '../api.js';
+import { pushToast } from '../store.js';
 import Empty from '../components/Empty.vue';
 import { expiryClass, expiryText } from '../lib/expiry.js';
 
 const alerts = ref([]);
 const loading = ref(true);
 const errorText = ref('');
+const tab = ref('pending');
+/** 正在处理的 alert id：用来禁用按钮，防止连点扣两次 */
+const busyId = ref(0);
 
 const TYPE_TEXT = { expire: '到期', opened_expire: '开封后到期', low_stock: '库存不足' };
+const STATUS_TEXT = { done: '已用掉', discarded: '已丢弃', ignored: '已忽略' };
+
+const pending = computed(() => alerts.value.filter((a) => a.status === 'pending'));
+const handled = computed(() => alerts.value.filter((a) => a.status !== 'pending'));
+const shown = computed(() => (tab.value === 'pending' ? pending.value : handled.value));
 
 async function load() {
   loading.value = true;
   errorText.value = '';
   try {
-    alerts.value = await get('/alerts', { status: 'pending' });
+    alerts.value = await get('/alerts', { status: 'all' });
   } catch (err) {
     errorText.value = err.message || '加载失败';
   } finally {
     loading.value = false;
+  }
+}
+
+async function handle(a, action) {
+  if (busyId.value) return;
+  busyId.value = a.id;
+  try {
+    await post(`/alerts/${a.id}/handle`, { action, clientOpId: newClientOpId('alert') });
+    pushToast(action === 'done' ? '已用掉 1 个，库存已扣减' : action === 'discard' ? '已丢弃这一批' : '已忽略这条提醒', 'ok');
+    await load();
+  } catch {
+    // api.js 已经弹过错误提示，这里只负责解锁按钮
+  } finally {
+    busyId.value = 0;
   }
 }
 
@@ -32,30 +60,76 @@ onMounted(load);
 <template>
   <div>
     <p v-if="errorText" class="card">{{ errorText }}</p>
-    <div class="section-title">
-      <span>待处理（{{ alerts.length }}）</span>
-      <RouterLink to="/settings">提醒设置</RouterLink>
+
+    <div class="segmented">
+      <button
+        type="button"
+        class="segmented__item"
+        :class="{ 'is-active': tab === 'pending' }"
+        @click="tab = 'pending'"
+      >
+        待处理 {{ pending.length }}
+      </button>
+      <button
+        type="button"
+        class="segmented__item"
+        :class="{ 'is-active': tab === 'handled' }"
+        @click="tab = 'handled'"
+      >
+        已处理 {{ handled.length }}
+      </button>
     </div>
 
     <div v-if="loading" class="empty">加载中…</div>
-    <Empty v-else-if="!alerts.length" icon="✅" text="没有待处理的提醒" hint="过期、快到期、低库存都会出现在这里" />
+    <Empty
+      v-else-if="!shown.length"
+      :icon="tab === 'pending' ? '✅' : '🗂'"
+      :text="tab === 'pending' ? '没有待处理的提醒' : '还没有处理过任何提醒'"
+      :hint="tab === 'pending' ? '过期、快到期、低库存都会出现在这里' : '处理过的会留在这里，方便回看'"
+    />
     <div v-else class="list">
-      <div v-for="a in alerts" :key="a.id" class="row">
-        <div class="row__main">
-          <div class="row__title">
-            {{ a.itemName }}
-            <span class="badge">{{ TYPE_TEXT[a.type] || a.type }}</span>
+      <div v-for="a in shown" :key="a.id" class="card card--flush">
+        <div class="row row--tight">
+          <div class="row__main">
+            <div class="row__title">
+              {{ a.itemName }}
+              <span class="badge">{{ TYPE_TEXT[a.type] || a.type }}</span>
+            </div>
+            <div class="row__sub">{{ a.locationName }} · {{ a.qty }} {{ a.unit }}</div>
           </div>
-          <div class="row__sub">{{ a.locationName }} · {{ a.qty }} {{ a.unit }}</div>
+          <div class="row__side">
+            <span v-if="a.type === 'low_stock'" class="muted">库存低于补货线</span>
+            <span v-else-if="a.status === 'pending'" :class="expiryClass(a.dueDate)">
+              {{ expiryText(a.dueDate) }}
+            </span>
+            <span v-else class="muted">
+              {{ STATUS_TEXT[a.status] || a.status }}
+              <template v-if="a.handledAt"> · {{ a.handledAt.slice(0, 16) }}</template>
+            </span>
+          </div>
         </div>
-        <div class="row__side">
-          <span :class="expiryClass(a.dueDate)">{{ expiryText(a.dueDate) }}</span>
+
+        <div v-if="a.status === 'pending'" class="row-actions">
+          <RouterLink v-if="a.type === 'low_stock'" to="/shopping" class="btn btn--sm">
+            去购物清单补货
+          </RouterLink>
+          <template v-else>
+            <button type="button" class="btn btn--sm btn--primary" :disabled="busyId === a.id" @click="handle(a, 'done')">
+              用掉 1 个
+            </button>
+            <button type="button" class="btn btn--sm" :disabled="busyId === a.id" @click="handle(a, 'discard')">
+              整批丢弃
+            </button>
+            <button type="button" class="btn btn--sm" :disabled="busyId === a.id" @click="handle(a, 'ignore')">
+              忽略
+            </button>
+          </template>
         </div>
       </div>
     </div>
 
     <p class="muted mt-4">
-      阶段 5 接上：一键「用掉 / 丢弃 / 忽略」，用掉会同时扣库存并写流水。
+      「用掉」会扣库存并写一条流水，「丢弃」丢掉这个批次剩余，「忽略」只关掉提醒。
     </p>
   </div>
 </template>
