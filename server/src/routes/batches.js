@@ -50,6 +50,14 @@ function toBatch(row) {
 }
 
 export default async function batchRoutes(app) {
+  // 查询参数里的 id 一律按正整数校验：传 abc 直接 400，
+  // 而不是悄悄变成 NaN 查不到东西（前端排查时 400 比空数组好定位）
+  function posInt(value, name) {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n <= 0) throw new OpError(400, 'BAD_REQUEST', `${name} 必须是正整数`);
+    return n;
+  }
+
   // 批次列表：itemId / locationId（含子树）/ expiringIn（N 天内到期，含已过期，前端用颜色区分）/ status
   app.get('/batches', async (req) => {
     const tenantId = req.user.tenantId;
@@ -60,10 +68,10 @@ export default async function batchRoutes(app) {
 
     if (itemId) {
       wheres.push('b.item_id = ?');
-      params.push(Number(itemId));
+      params.push(posInt(itemId, 'itemId'));
     }
     if (locationId) {
-      const ids = await subtreeIds(Number(locationId), tenantId);
+      const ids = await subtreeIds(posInt(locationId, 'locationId'), tenantId);
       if (!ids.length) return [];
       wheres.push(`b.location_id IN (${ids.map(() => '?').join(',')})`);
       params.push(...ids);
@@ -233,11 +241,11 @@ export default async function batchRoutes(app) {
     const params = [tenantId];
     if (itemId) {
       wheres.push('s.item_id = ?');
-      params.push(Number(itemId));
+      params.push(posInt(itemId, 'itemId'));
     }
     if (batchId) {
       wheres.push('s.batch_id = ?');
-      params.push(Number(batchId));
+      params.push(posInt(batchId, 'batchId'));
     }
     if (type) {
       wheres.push('s.type = ?');

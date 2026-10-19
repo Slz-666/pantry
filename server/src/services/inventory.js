@@ -23,6 +23,9 @@ export class OpError extends Error {
   constructor(status, code, message) {
     super(message);
     this.status = status;
+    // Fastify 的错误处理器认 statusCode，两个都写：路由里 catch 后自己回包用 status，
+    // 漏 catch 掉到全局兜底时也不至于变成 500（否则参数校验失败会被误报成服务器错误）
+    this.statusCode = status;
     this.code = code;
   }
 }
