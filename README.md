@@ -261,6 +261,7 @@ docs/  schema.md · extract-eval.md · offline.md · deploy.md · metrics.md · 
 | [`docs/deploy.md`](docs/deploy.md) | 部署、自签 HTTPS、手机装 CA、真机验收记录 |
 | [`docs/metrics.md`](docs/metrics.md) | 三个核心指标的 SQL 口径 |
 | [`docs/interview.md`](docs/interview.md) | 面试问答（7 题 + 追问） |
+| [`docs/demo-script.md`](docs/demo-script.md) | 演示视频分镜（15 个镜头 / 60–90 秒） |
 
 ## License
 
