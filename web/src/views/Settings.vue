@@ -29,6 +29,6 @@ function logout() {
       <p class="muted">0 地基 ✓ · 1 数据层 ✓ · 2 接口层 ✓ · 3 界面骨架 ✓ · 4 录入 Agent · 5 提醒与清单 · 6 离线 · 7 手机</p>
     </div>
 
-    <button class="btn btn--block" type="button" style="margin-top: 12px" @click="logout">退出登录</button>
+    <button class="btn btn--block mt-3" type="button" @click="logout">退出登录</button>
   </div>
 </template>

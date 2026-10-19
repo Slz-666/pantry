@@ -51,22 +51,22 @@ function signed(n) {
 </script>
 
 <template>
-  <div>
+  <div class="detail-page">
     <p v-if="errorText" class="card">{{ errorText }}</p>
     <div v-if="loading" class="empty">加载中…</div>
 
     <template v-else-if="item">
       <div class="card">
-        <div class="page-head" style="margin-bottom: 8px">
-          <h2 class="page-title">{{ item.name }}</h2>
+        <div class="detail-head">
+          <h2 class="detail-head__name">{{ item.name }}</h2>
           <span v-if="item.category" class="badge">{{ item.category }}</span>
         </div>
-        <div class="muted">
+        <div class="detail-sub">
           <span v-if="item.spec">{{ item.spec }} · </span>
           共 {{ item.totalQty }} {{ item.unit }} · {{ item.batchCount }} 个批次
           <span v-if="item.locationName"> · 默认位置 {{ item.locationName }}</span>
         </div>
-        <p v-if="item.note" class="muted">{{ item.note }}</p>
+        <p v-if="item.note" class="detail-sub">{{ item.note }}</p>
       </div>
 
       <div class="section-title"><span>批次（先过期先处理）</span></div>
@@ -77,19 +77,14 @@ function signed(n) {
 
       <div class="section-title"><span>最近流水</span></div>
       <Empty v-if="!logs.length" icon="🧾" text="还没有流水" />
-      <div v-else class="list">
-        <div v-for="log in logs" :key="log.id" class="row">
-          <div class="row__main">
-            <div class="row__title">
-              {{ TYPE_TEXT[log.type] || log.type }}
-              <span class="muted">{{ signed(log.qtyDelta) }}</span>
-            </div>
-            <div class="row__sub">
-              {{ log.createdAt }}
-              <span v-if="log.reason"> · {{ log.reason }}</span>
-            </div>
-          </div>
-          <div class="row__side muted">{{ log.qtyAfter }}</div>
+      <div v-else class="card card--flush">
+        <div v-for="log in logs" :key="log.id" class="log-row">
+          <span class="log-row__type">{{ TYPE_TEXT[log.type] || log.type }}</span>
+          <span class="log-row__delta">{{ signed(log.qtyDelta) }}</span>
+          <span class="log-row__meta">
+            {{ log.createdAt }}<template v-if="log.reason"> · {{ log.reason }}</template> ·
+            {{ log.qtyAfter }}
+          </span>
         </div>
       </div>
     </template>

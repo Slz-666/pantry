@@ -174,12 +174,10 @@ async function onConfirm(items) {
 </script>
 
 <template>
-  <div>
+  <div class="entry-page">
     <div class="card">
-      <h2 class="page-title">记一笔</h2>
-      <p class="muted" style="margin-top: 4px">
-        说一句就行：「牛奶两盒放冰箱冷藏，10月25号过期」。
-      </p>
+      <h2 class="page-title">一句话录入</h2>
+      <p class="muted mt-1">说一句就行，比如「牛奶两盒放冰箱冷藏，10月25号过期」。</p>
 
       <textarea
         v-model="text"
@@ -216,7 +214,7 @@ async function onConfirm(items) {
           {{ ex }}
         </button>
       </div>
-      <button class="btn btn--ghost btn--block" type="button" style="margin-top: 8px" @click="openManual">
+      <button class="btn btn--ghost btn--block mt-2" type="button" @click="openManual">
         不想说，手动填
       </button>
     </div>

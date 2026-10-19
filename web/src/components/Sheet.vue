@@ -20,7 +20,7 @@ function onMaskClick(e) {
       <div class="sheet" role="dialog" aria-modal="true">
         <div class="sheet__head">
           <div class="sheet__title">{{ props.title }}</div>
-          <div style="flex: 1"></div>
+          <div class="grow"></div>
           <button class="btn btn--ghost" type="button" @click="emit('close')">关闭</button>
         </div>
         <slot />

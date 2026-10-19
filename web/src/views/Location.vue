@@ -67,8 +67,10 @@ function goParent() {
 <template>
   <div>
     <div class="page-head">
-      <button v-if="currentId != null" class="btn btn--ghost" type="button" @click="goParent">← 上一层</button>
-      <h2 class="page-title">{{ currentNode ? currentNode.name : '全部物品' }}</h2>
+      <button v-if="currentId != null" class="btn btn--ghost btn--sm" type="button" @click="goParent">
+        ← 上一层
+      </button>
+      <h2 class="page-title page-title--crumb">{{ currentNode ? currentNode.name : '全部物品' }}</h2>
     </div>
 
     <p v-if="errorText" class="card">{{ errorText }}</p>

@@ -90,7 +90,7 @@ watch(
 
   <div v-else class="app-shell">
     <aside class="sidebar">
-      <div class="brand">🥫 家里有什么</div>
+      <div class="brand"><span class="brand__mark">🥫</span>家里有什么</div>
 
       <nav class="nav-section">
         <RouterLink to="/" class="nav-link" :class="{ 'is-active': isActive('home') }">

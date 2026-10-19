@@ -51,7 +51,7 @@ function qtyOf(n) {
         <div class="stat__label">7 天内到期</div>
       </div>
       <div class="stat">
-        <div class="stat__num" :style="stocks.expiredCount ? 'color: var(--c-danger)' : ''">
+        <div class="stat__num" :class="{ 'is-danger': stocks.expiredCount }">
           {{ qtyOf(stocks.expiredCount) }}
         </div>
         <div class="stat__label">已过期</div>

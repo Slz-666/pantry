@@ -47,6 +47,6 @@ onMounted(load);
       </div>
     </div>
 
-    <p class="muted" style="margin-top: 16px">阶段 5 接上：手动加购、买回来一键入库（生成批次 + 写流水）。</p>
+    <p class="muted mt-4">阶段 5 接上：手动加购、买回来一键入库（生成批次 + 写流水）。</p>
   </div>
 </template>

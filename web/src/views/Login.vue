@@ -38,8 +38,9 @@ async function submit() {
 
 <template>
   <div class="login-card">
-    <h1 class="login-card__title">🥫 家里有什么</h1>
-    <p class="muted">家庭物资与效期管理，自用版。</p>
+    <span class="login-card__brand" aria-hidden="true">🥫</span>
+    <h1 class="login-card__title">家里有什么</h1>
+    <p class="login-card__sub">家庭物资与效期管理 · 自用版</p>
 
     <form class="form" @submit.prevent="submit">
       <Field v-model="username" label="账号" autocomplete="username" />

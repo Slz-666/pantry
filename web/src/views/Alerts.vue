@@ -54,7 +54,7 @@ onMounted(load);
       </div>
     </div>
 
-    <p class="muted" style="margin-top: 16px">
+    <p class="muted mt-4">
       阶段 5 接上：一键「用掉 / 丢弃 / 忽略」，用掉会同时扣库存并写流水。
     </p>
   </div>

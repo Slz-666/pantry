@@ -153,7 +153,7 @@ function submit() {
         <p class="muted">
           模型判断你在问库存或者改数量。查询请用搜索；改数量请进物品详情页改批次。
         </p>
-        <button class="btn btn--block" type="button" style="margin-top: 8px" @click="emit('close')">
+        <button class="btn btn--block mt-2" type="button" @click="emit('close')">
           知道了
         </button>
       </div>
@@ -248,7 +248,7 @@ function submit() {
 
         <p v-if="!complete" class="entry-hint">名称、数量（大于 0）、单位、位置都齐了才能入库</p>
 
-        <div class="row" style="gap: 8px; margin-top: 8px">
+        <div class="row mt-2 row--tight">
           <button class="btn btn--block" type="button" @click="emit('close')">取消</button>
           <button
             class="btn btn--primary btn--block"
