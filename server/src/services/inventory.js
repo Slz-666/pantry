@@ -153,7 +153,7 @@ export async function stockInTx(conn, { tenantId, memberId, itemId, locationId, 
   const logId = await writeLog(conn, {
     tenantId, batchId, itemId: iid, locationId: lid,
     type: 'in', delta: q, before: '0.00', after: q,
-    reason: 'manual', clientOpId, memberId,
+    reason: '手工入库', clientOpId, memberId,
   });
   return { idempotent: false, logId, batchId, type: 'in', qtyAfter: Number(q) };
 }

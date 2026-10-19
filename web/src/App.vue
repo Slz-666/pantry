@@ -1,27 +1,169 @@
 <script setup>
-// 阶段 0 的 App.vue 只干一件事：证明「前端 → vite 代理 → 后端」这条链是通的。
-// 阶段 3 会把它换成路由 + 真正的首页。
-import { onMounted, ref } from 'vue'
+/**
+ * 应用外壳：手机 = 顶栏 + 底部 4 tab + 悬浮录入；桌面 = 左侧栏（导航 + 位置树）+ 右侧内容。
+ * 同一套 DOM，靠 styles.css 的 768px 断点切换显示，不写 JS 判断屏幕宽度
+ * （JS 判断会在窗口缩放时漏更新，也更容易出现「手机上出现桌面样式」）。
+ */
+import { computed, onMounted, onUnmounted, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { store, loadLocations, locationName } from './store.js';
+import { get } from './api.js';
 
-const health = ref(null)
-const error = ref('')
+const route = useRoute();
+const router = useRouter();
 
-onMounted(async () => {
-  try {
-    const res = await fetch('/api/health')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    health.value = await res.json()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+const isLogin = computed(() => route.name === 'login');
+
+const TITLES = {
+  home: '家里有什么',
+  location: '位置',
+  item: '物品详情',
+  add: '记一笔',
+  shopping: '购物清单',
+  alerts: '提醒',
+  settings: '我的',
+};
+
+const title = computed(() => {
+  if (route.name === 'location') {
+    return route.params.id ? locationName(route.params.id) || '位置' : '全部位置';
   }
-})
+  return TITLES[route.name] || '家里有什么';
+});
+
+const tabs = [
+  { name: 'home', label: '首页', icon: '🏠', to: '/' },
+  { name: 'shopping', label: '清单', icon: '🧺', to: '/shopping' },
+  { name: 'alerts', label: '提醒', icon: '🔔', to: '/alerts' },
+  { name: 'settings', label: '我的', icon: '👤', to: '/settings' },
+];
+
+function isActive(name) {
+  return route.name === name;
+}
+
+function isLocationActive(id) {
+  return route.name === 'location' && String(route.params.id ?? '') === String(id);
+}
+
+async function ensureSession() {
+  if (!store.token) return;
+  try {
+    await loadLocations(get);
+  } catch {
+    /* 位置树加载失败不阻塞页面，具体页会各自报错 */
+  }
+  try {
+    store.member = await get('/auth/me', undefined, { silent: true });
+  } catch {
+    /* /auth/me 失败说明 token 无效，api 层已经处理跳登录 */
+  }
+}
+
+function onAuthExpired() {
+  if (route.name === 'login') return;
+  router.replace({ name: 'login', query: { redirect: route.fullPath } });
+}
+
+onMounted(() => {
+  ensureSession();
+  window.addEventListener('auth:expired', onAuthExpired);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('auth:expired', onAuthExpired);
+});
+
+// 登录成功后 token 变化，补加载会话数据（Login 页没有这一层）
+watch(
+  () => store.token,
+  (token) => {
+    if (token) ensureSession();
+  },
+);
 </script>
 
 <template>
-  <main>
-    <h1>家里有什么</h1>
-    <p v-if="error">接口请求失败：{{ error }}</p>
-    <p v-else-if="health"><code>/api/health</code> → {{ JSON.stringify(health) }}</p>
-    <p v-else>检查中…</p>
-  </main>
+  <div v-if="isLogin" class="login-shell">
+    <RouterView />
+  </div>
+
+  <div v-else class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">🥫 家里有什么</div>
+
+      <nav class="nav-section">
+        <RouterLink to="/" class="nav-link" :class="{ 'is-active': isActive('home') }">
+          <span>首页</span>
+        </RouterLink>
+        <RouterLink to="/shopping" class="nav-link" :class="{ 'is-active': isActive('shopping') }">
+          <span>购物清单</span>
+        </RouterLink>
+        <RouterLink to="/alerts" class="nav-link" :class="{ 'is-active': isActive('alerts') }">
+          <span>提醒</span>
+        </RouterLink>
+      </nav>
+
+      <nav class="nav-section">
+        <div class="nav-section__title">位置</div>
+        <RouterLink
+          to="/"
+          class="nav-link"
+          :class="{ 'is-active': route.name === 'location' && !route.params.id }"
+        >
+          <span>全部物品</span>
+        </RouterLink>
+        <template v-for="root in store.tree" :key="root.id">
+          <RouterLink
+            :to="{ name: 'location', params: { id: root.id } }"
+            class="nav-link"
+            :class="{ 'is-active': isLocationActive(root.id) }"
+          >
+            <span>{{ root.name }}</span>
+          </RouterLink>
+          <RouterLink
+            v-for="child in root.children"
+            :key="child.id"
+            :to="{ name: 'location', params: { id: child.id } }"
+            class="nav-link nav-link--child"
+            :class="{ 'is-active': isLocationActive(child.id) }"
+          >
+            <span>{{ child.name }}</span>
+          </RouterLink>
+        </template>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h1 class="topbar__title">{{ title }}</h1>
+        <div class="topbar__spacer"></div>
+        <RouterLink v-if="route.name === 'home'" to="/add" class="btn btn--primary">记一笔</RouterLink>
+        <span v-else-if="store.member" class="muted">{{ store.member.displayName || store.member.username }}</span>
+      </header>
+
+      <div class="content">
+        <RouterView />
+      </div>
+    </main>
+
+    <nav class="tabbar">
+      <RouterLink
+        v-for="tab in tabs"
+        :key="tab.name"
+        :to="tab.to"
+        class="tabbar__item"
+        :class="{ 'is-active': isActive(tab.name) }"
+      >
+        <span class="tabbar__icon">{{ tab.icon }}</span>
+        <span>{{ tab.label }}</span>
+      </RouterLink>
+    </nav>
+
+    <RouterLink to="/add" class="fab" aria-label="记一笔">+</RouterLink>
+
+    <div class="toasts">
+      <div v-for="t in store.toasts" :key="t.id" class="toast">{{ t.message }}</div>
+    </div>
+  </div>
 </template>

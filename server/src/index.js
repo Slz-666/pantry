@@ -9,6 +9,7 @@ import itemRoutes from './routes/items.js';
 import batchRoutes from './routes/batches.js';
 import shoppingRoutes from './routes/shopping.js';
 import alertRoutes from './routes/alerts.js';
+import summaryRoutes from './routes/summary.js';
 
 const app = Fastify({ logger: true });
 
@@ -69,6 +70,7 @@ await app.register(itemRoutes, { prefix: '/api' });
 await app.register(batchRoutes, { prefix: '/api' });
 await app.register(shoppingRoutes, { prefix: '/api' });
 await app.register(alertRoutes, { prefix: '/api' });
+await app.register(summaryRoutes, { prefix: '/api' });
 
 // 生产用定时扫描：每分钟检查一次提醒（本地 dev 不一定要跑，但起来也无害）。
 // 用 unref 的 interval，不让它拖住进程退出。

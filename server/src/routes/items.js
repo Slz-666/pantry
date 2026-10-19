@@ -24,6 +24,7 @@ function toItem(row) {
     category: row.category,
     aliases: safeJson(row.aliases),
     defaultLocationId: row.default_location_id,
+    locationName: row.location_name ?? null,
     shelfLifeDays: row.shelf_life_days,
     lowStockThreshold: row.low_stock_threshold,
     note: row.note,
@@ -55,10 +56,12 @@ export default async function itemRoutes(app) {
     const { q, category, locationId, expiringIn, limit = 50, offset = 0 } = req.query || {};
     const tenantId = req.user.tenantId;
 
-    const params = [];
+    // 占位符按 SQL 文本里出现的顺序排：JOIN 里的（位置子树）在 WHERE 之前，
+    // 所以两段参数分开攒，最后合并——混在一起会因为顺序错位静默查出空结果。
+    const onParams = [];
     const joinConds = ['b.item_id = i.id', 'b.tenant_id = i.tenant_id'];
     const wheres = ['i.tenant_id = ?', 'i.deleted_at IS NULL'];
-    params.push(tenantId);
+    const params = [tenantId];
 
     if (q) {
       wheres.push('(i.name LIKE ? OR i.aliases LIKE ?)');
@@ -74,7 +77,7 @@ export default async function itemRoutes(app) {
       if (!ids.length) wheres.push('1 = 0');
       else {
         joinConds.push(`b.location_id IN (${ids.map(() => '?').join(',')})`);
-        params.push(...ids);
+        onParams.push(...ids);
       }
     }
     if (expiringIn) {
@@ -93,11 +96,13 @@ export default async function itemRoutes(app) {
     const sql = `
       SELECT i.id, i.name, i.spec, i.unit, i.category, i.aliases,
              i.default_location_id, i.shelf_life_days, i.low_stock_threshold, i.note,
+             MAX(l.name) AS location_name,
              COALESCE(SUM(b.qty), 0) AS total_qty,
              MIN(CASE WHEN b.qty > 0 THEN b.expire_at END) AS earliest_expire_at,
              COUNT(CASE WHEN b.qty > 0 THEN b.id END) AS batch_count
       FROM item i
       LEFT JOIN batch b ON ${joinConds.join(' AND ')}
+      LEFT JOIN location l ON l.id = i.default_location_id AND l.tenant_id = i.tenant_id
       WHERE ${wheres.join(' AND ')}
       GROUP BY i.id
       ${having}
@@ -105,7 +110,7 @@ export default async function itemRoutes(app) {
       LIMIT ? OFFSET ?`;
     params.push(Math.min(Number(limit) || 50, 200), Number(offset) || 0);
 
-    const rows = await query(sql, params);
+    const rows = await query(sql, [...onParams, ...params]);
     return rows.map(toItem);
   });
 
@@ -116,11 +121,13 @@ export default async function itemRoutes(app) {
     const items = await query(
       `SELECT i.id, i.name, i.spec, i.unit, i.category, i.aliases,
               i.default_location_id, i.shelf_life_days, i.low_stock_threshold, i.note,
+              MAX(l.name) AS location_name,
               COALESCE(SUM(b.qty), 0) AS total_qty,
               MIN(CASE WHEN b.qty > 0 THEN b.expire_at END) AS earliest_expire_at,
               COUNT(CASE WHEN b.qty > 0 THEN b.id END) AS batch_count
        FROM item i
        LEFT JOIN batch b ON b.item_id = i.id AND b.tenant_id = i.tenant_id
+       LEFT JOIN location l ON l.id = i.default_location_id AND l.tenant_id = i.tenant_id
        WHERE i.id = ? AND i.tenant_id = ? AND i.deleted_at IS NULL
        GROUP BY i.id`,
       [id, tenantId],
@@ -128,7 +135,7 @@ export default async function itemRoutes(app) {
     if (!items.length) return fail(reply, 404, 'NOT_FOUND', '物品不存在');
 
     const batches = await query(
-      `SELECT b.id, b.location_id, l.name AS location_name, b.qty, b.unit, b.expire_at,
+      `SELECT b.id, b.location_id, l.name AS location_name, b.qty, b.expire_at,
               b.opened_at, b.status, b.note, b.created_at
        FROM batch b
        JOIN location l ON l.id = b.location_id AND l.tenant_id = b.tenant_id
@@ -143,7 +150,6 @@ export default async function itemRoutes(app) {
         locationId: b.location_id,
         locationName: b.location_name,
         qty: Number(b.qty),
-        unit: b.unit,
         expireAt: b.expire_at,
         opened: !!b.opened_at,
         openedAt: b.opened_at,
