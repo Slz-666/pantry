@@ -10,7 +10,7 @@
  */
 import { query } from '../db.js';
 import { fail } from '../lib/http.js';
-import { OpError, stockIn, consume, discard, adjust, move } from '../services/inventory.js';
+import { OpError, stockIn, stockInTx, runWrite, consume, discard, adjust, move } from '../services/inventory.js';
 import { subtreeIds } from './locations.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -120,21 +120,85 @@ export default async function batchRoutes(app) {
     return toBatch(rows[0]);
   });
 
-  // 入库 = 建新批次 + 写 in 流水（一个事务，见 inventory.stockIn）
+  /**
+   * 入库 = 建新批次 + 写 in 流水（一个事务，见 inventory.stockIn）。
+   *
+   * 两种用法：
+   * - 有 itemId：物品已经存在（例如从物品详情页「再买一次」）；
+   * - 没有 itemId 但有 name：手动录入的路径。物品还不存在就先建档，
+   *   建档和入库在同一个事务里，失败一起回滚，不会留下没人认领的空物品。
+   *   item 的唯一键是 (tenant_id, name_key)，name_key = name|spec，所以同名不同规格
+   *   会被当成两个物品——这跟搜索、展示的口径一致。
+   */
   app.post('/batches', async (req, reply) => {
     const body = req.body || {};
+    const tenantId = req.user.tenantId;
+    const memberId = req.user.memberId;
     try {
-      const out = await stockIn({
-        tenantId: req.user.tenantId,
-        memberId: req.user.memberId,
-        itemId: body.itemId,
-        locationId: body.locationId,
-        qty: body.qty,
-        producedAt: dateArg(body.producedAt, 'producedAt'),
-        expireAt: dateArg(body.expireAt, 'expireAt'),
-        openedAt: body.openedAt ?? null,
-        note: body.note ?? null,
-        clientOpId: body.clientOpId,
+      const expireAt = dateArg(body.expireAt, 'expireAt');
+      const producedAt = dateArg(body.producedAt, 'producedAt');
+
+      if (body.itemId != null) {
+        const out = await stockIn({
+          tenantId,
+          memberId,
+          itemId: body.itemId,
+          locationId: body.locationId,
+          qty: body.qty,
+          producedAt,
+          expireAt,
+          openedAt: body.openedAt ?? null,
+          note: body.note ?? null,
+          clientOpId: body.clientOpId,
+        });
+        return reply.code(201).send({ ok: true, ...out });
+      }
+
+      // 手动录入：先找同名物品，找不到再建，然后入库，全程一个事务 + 一个幂等键
+      const name = String(body.name ?? '').trim();
+      if (!name) throw new OpError(400, 'BAD_REQUEST', '缺少 itemId，或者给一个物品名称');
+      if (name.length > 64) throw new OpError(400, 'BAD_REQUEST', '物品名称最多 64 个字');
+      const spec = body.spec ? String(body.spec).trim().slice(0, 32) : null;
+      const unit = body.unit ? String(body.unit) : '个';
+      const category = body.category || null;
+      const nameKey = `${name}|${spec || ''}`;
+
+      const out = await runWrite(tenantId, body.clientOpId, async (conn) => {
+        let [rows] = await conn.execute(
+          'SELECT id FROM item WHERE tenant_id = ? AND name_key = ? AND deleted_at IS NULL',
+          [tenantId, nameKey],
+        );
+        let itemId = rows[0]?.id;
+        if (!itemId) {
+          try {
+            const [ins] = await conn.execute(
+              'INSERT INTO item (tenant_id, name, spec, unit, category) VALUES (?, ?, ?, ?, ?)',
+              [tenantId, name, spec, unit, category],
+            );
+            itemId = ins.insertId;
+          } catch (err) {
+            // 并发建同名物品：唯一键挡住后重新取一次，接着入库即可
+            if (err.code !== 'ER_DUP_ENTRY') throw err;
+            [rows] = await conn.execute(
+              'SELECT id FROM item WHERE tenant_id = ? AND name_key = ?',
+              [tenantId, nameKey],
+            );
+            itemId = rows[0]?.id;
+            if (!itemId) throw err;
+          }
+        }
+        return stockInTx(conn, {
+          tenantId,
+          memberId,
+          itemId,
+          locationId: body.locationId,
+          qty: body.qty,
+          producedAt,
+          expireAt,
+          openedAt: body.openedAt ?? null,
+          note: body.note ?? null,
+          clientOpId: body.clientOpId,
+        });
       });
       return reply.code(201).send({ ok: true, ...out });
     } catch (err) {

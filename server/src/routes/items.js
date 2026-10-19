@@ -11,9 +11,11 @@
 import { query } from '../db.js';
 import { fail } from '../lib/http.js';
 import { subtreeIds } from './locations.js';
+// 单位/分类白名单只有一份（在 normalize.js）：录入校验和手工编辑必须同一套标准，
+// 否则会出现「Agent 能录进去、手工改不回来」的割裂。
+import { CATEGORY_LIST, UNIT_LIST } from '../services/normalize.js';
 
-export const UNIT_LIST = ['个', '盒', '袋', '瓶', '包', '罐', '斤', '500g', '份', '板', '桶', '颗', '支', '片', '丸', '套'];
-export const CATEGORY_LIST = ['食品', '日用品', '药品', '护肤品', '清洁用品', '宠物用品', '工具', '其他'];
+export { CATEGORY_LIST, UNIT_LIST };
 
 function toItem(row) {
   return {

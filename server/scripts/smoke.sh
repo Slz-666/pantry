@@ -163,5 +163,20 @@ expect "$(post_json "$BASE/api/alerts/$ALERT_ID/handle" "{\"action\":\"done\",\"
 expect "$(qty_of "$EXP_BATCH")" 4 "重复处理不再扣库存（仍 4）"
 
 echo
+echo "== 7. 录入 Agent（一句话抽草稿 / 非录入被拒） =="
+expect "$(code_of "$BASE/api/meta")" 200 "GET /api/meta 返回单位/分类白名单"
+expect "$(post_json "$BASE/api/extract" "{\"text\":\"冒烟测试酸奶 三杯放冰箱冷藏，2027年1月到期\",\"channel\":\"text\"}")" 200 "一句话抽成草稿（真调 DeepSeek）"
+DRAFT_N=$(jget ".draft.items.length" < "$TMP/resp.json")
+[ "${DRAFT_N:-0}" -ge 1 ] && ok "草稿里有 ${DRAFT_N} 条物品" || bad "草稿没有物品"
+expect "$(jget ".draft.items[0].qty" < "$TMP/resp.json")" 3 "数量抽对（三 → 3）"
+expect "$(jget ".draft.items[0].expireAt" < "$TMP/resp.json")" 2027-01-31 "只说月份 → 取月末（2027-01-31）"
+expect "$(jget ".draft.items[0].locationName" < "$TMP/resp.json")" 冷藏 "位置原话「冰箱冷藏」匹配到「冷藏」"
+
+expect "$(post_json "$BASE/api/extract" '{"text":"冰箱里的牛奶还剩几盒","channel":"text"}')" 200 "查询句不让接口报错"
+expect "$(jget ".draft.refused" < "$TMP/resp.json")" true "查询句被判成「不是录入」（refused）"
+expect "$(post_json "$BASE/api/extract" '{"text":"把冰箱的牛奶改成4盒","channel":"text"}')" 200 "修改句不让接口报错"
+expect "$(jget ".draft.refused" < "$TMP/resp.json")" true "修改句被判成「不是录入」（refused）"
+
+echo
 if [ "$FAILED" = "0" ]; then echo "全部通过"; else echo "存在失败项"; fi
 exit "$FAILED"

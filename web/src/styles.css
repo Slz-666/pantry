@@ -715,3 +715,152 @@ button {
   border-color: var(--c-danger);
   background: var(--c-danger-soft);
 }
+
+/* ---------- 记一笔：输入区 ---------- */
+
+.entry-textarea {
+  min-height: 96px;
+  height: auto;
+  padding: var(--sp-3);
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.entry-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.entry-actions .btn {
+  flex: 1;
+}
+
+/* 语音按钮只在支持识别器的设备出现；说话时用红色呼吸提示，不用动画库 */
+.btn--mic.is-listening {
+  background: var(--c-danger-soft);
+  border-color: var(--c-danger);
+  color: var(--c-danger);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.chip {
+  padding: 5px var(--sp-3);
+  border: 1px solid var(--c-border-strong);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-text-2);
+  font-size: var(--fs-2);
+  line-height: 1.3;
+}
+
+.chip:active {
+  background: var(--c-primary-soft);
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+}
+
+/* ---------- 确认卡片：每条物品一个编辑块 ---------- */
+
+.item-editor {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-2);
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  background: var(--c-surface);
+}
+
+.item-editor__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.item-editor__no {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-2);
+  font-weight: 600;
+  color: var(--c-text-2);
+}
+
+.item-editor__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+@media (min-width: 768px) {
+  .item-editor__grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* 必填但还空着：只标字不弹窗，让人一眼看到缺什么 */
+.field__req {
+  margin-left: 4px;
+  font-size: var(--fs-1);
+  font-weight: 400;
+  color: var(--c-danger);
+}
+
+.entry-hint {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-1);
+  color: var(--c-warn);
+  line-height: 1.5;
+}
+
+.entry-hint--info {
+  color: var(--c-primary);
+}
+
+.entry-question {
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-1);
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+  font-size: var(--fs-3);
+  line-height: 1.5;
+}
+
+.entry-note {
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-2);
+  background: var(--c-surface-2);
+  line-height: 1.6;
+}
+
+.entry-note strong {
+  display: block;
+  margin-bottom: var(--sp-1);
+}
+
+.entry-note--warn {
+  border-color: var(--c-warn);
+  background: var(--c-warn-soft);
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  font-size: var(--fs-2);
+  color: var(--c-text-2);
+}
+
+.checkbox input {
+  width: 18px;
+  height: 18px;
+}
