@@ -72,6 +72,7 @@ export async function api(path, { method = 'GET', body, params, silent = false }
 export const get = (path, params, opts = {}) => api(path, { ...opts, params });
 export const post = (path, body, opts = {}) => api(path, { ...opts, method: 'POST', body });
 export const patch = (path, body, opts = {}) => api(path, { ...opts, method: 'PATCH', body });
+export const put = (path, body, opts = {}) => api(path, { ...opts, method: 'PUT', body });
 export const del = (path, params, opts = {}) => api(path, { ...opts, method: 'DELETE', params });
 
 /**

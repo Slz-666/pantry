@@ -15,15 +15,17 @@
 import { query, withTransaction } from '../db.js';
 import { fail } from '../lib/http.js';
 import { jsonArray } from '../lib/json.js';
-import { OpError, stockInTx } from '../services/inventory.js';
+import { MAX_STOCK_IN, OpError, stockInTx } from '../services/inventory.js';
 import { extractRaw } from '../services/extract.js';
-import { addDays, addMonths, isValidDate, normalizeDraft, todayString } from '../services/normalize.js';
+import { addDays, addMonths, isValidDate, normalizeDraft, todayString, UNIT_LIST } from '../services/normalize.js';
+import { categoryNames } from '../services/categories.js';
 
 const MAX_TEXT = 500;
+const BARCODE_RE = /^[0-9A-Za-z-]{4,64}$/;
 
-/** 位置、物品、存量批次：一次拉齐给归一化用（自用库很小，不做分页）。 */
+/** 位置、物品、存量批次、分类：一次拉齐给归一化用（自用库很小，不做分页）。 */
 async function loadContext(tenantId) {
-  const [locations, itemRows, batchRows] = await Promise.all([
+  const [locations, itemRows, batchRows, categories] = await Promise.all([
     query('SELECT id, name, parent_id FROM location WHERE tenant_id = ? ORDER BY sort_order, id', [tenantId]),
     query(
       'SELECT id, name, spec, aliases FROM item WHERE tenant_id = ? AND deleted_at IS NULL ORDER BY id',
@@ -35,9 +37,11 @@ async function loadContext(tenantId) {
        ORDER BY id DESC LIMIT 500`,
       [tenantId],
     ),
+    categoryNames(tenantId),
   ]);
 
   return {
+    categories,
     locations: locations.map((r) => ({ id: r.id, name: r.name, parentId: r.parent_id })),
     items: itemRows.map((r) => ({
       id: r.id,
@@ -171,6 +175,8 @@ export default async function extractRoutes(app) {
     if (!clientOpId) return fail(reply, 400, 'BAD_REQUEST', '缺少 clientOpId（幂等键）');
 
     const today = todayString();
+    // 分类白名单要按租户取（F-5.2 可自定义），校验和建档都用这一份
+    const cats = await categoryNames(tenant);
 
     try {
       const results = await withTransaction(async (conn) => {
@@ -189,9 +195,14 @@ export default async function extractRoutes(app) {
           const it = items[i] || {};
           const name = String(it.name ?? '').trim();
           if (!name) throw new OpError(400, 'BAD_REQUEST', `第 ${i + 1} 条缺物品名称`);
+          if (name.length > 64) throw new OpError(400, 'BAD_REQUEST', `「${name}」名称太长（最多 64 字）`);
 
           const qty = Number(it.qty);
           if (!Number.isFinite(qty) || qty <= 0) throw new OpError(400, 'BAD_REQUEST', `「${name}」数量不合法`);
+          // 上限校验以前只在界面做，直接打接口能塞进 5000 箱（PRD 9.2 上限 999）
+          if (qty > MAX_STOCK_IN) {
+            throw new OpError(400, 'BAD_REQUEST', `「${name}」数量太大（最多 ${MAX_STOCK_IN}），是不是单位弄错了？`);
+          }
 
           const locationId = Number(it.locationId);
           if (!Number.isInteger(locationId) || locationId <= 0) {
@@ -200,6 +211,23 @@ export default async function extractRoutes(app) {
 
           const unit = it.unit ? String(it.unit).trim() : null;
           if (!unit) throw new OpError(400, 'BAD_REQUEST', `「${name}」没选单位`);
+          // 单位也必须是白名单里的：以前 confirm 完全没校验，unit=吨 也能入库
+          if (!UNIT_LIST.includes(unit)) {
+            throw new OpError(400, 'BAD_REQUEST', `「${name}」的单位「${unit}」不在白名单里（可选：${UNIT_LIST.join('/')}）`);
+          }
+
+          // 分类：模型偶尔给出不在词表里的分类（「蔬菜」「零食」），不因此拦住入库，
+          // 落到「其他」而不是「食品」——宁可少分类，不要乱分类。
+          const category = it.category && cats.includes(String(it.category))
+            ? String(it.category)
+            : cats.includes('其他')
+              ? '其他'
+              : cats[0] || '其他';
+
+          const barcode = it.barcode ? String(it.barcode).trim() : null;
+          if (barcode && !BARCODE_RE.test(barcode)) {
+            throw new OpError(400, 'BAD_REQUEST', `「${name}」的条码格式不对（4–64 位数字/字母/横线）`);
+          }
 
           // 复用已有物品（方案 A：同名即复用，不再产生「酸奶」和「酸奶 100g」两条档案）。
           // item 表的唯一键是 (tenant_id, name_key)，name_key 含 spec，所以数据库允许同名多规格并存；
@@ -235,9 +263,24 @@ export default async function extractRoutes(app) {
               const [ins] = await conn.execute(
                 `INSERT INTO item (tenant_id, name, spec, unit, category, aliases, default_location_id, note)
                  VALUES (?, ?, ?, ?, ?, '[]', ?, NULL)`,
-                [tenant, name, spec, unit, it.category ?? '其他', locationId],
+                [tenant, name, spec, unit, category, locationId],
               );
               itemId = ins.insertId;
+            }
+          }
+
+          // 条码：新档案直接写进去；老档案没条码就补上（扫一次，以后就能扫出来）。
+          // 撞了别的物品的条码不算错误——不能因为一个码重复就让整笔录入失败，
+          // 这里跳过即可（物品本身还是要入库的）。
+          if (barcode) {
+            try {
+              await conn.execute('UPDATE item SET barcode = COALESCE(barcode, ?) WHERE id = ? AND tenant_id = ?', [
+                barcode,
+                itemId,
+                tenant,
+              ]);
+            } catch (err) {
+              if (err.code !== 'ER_DUP_ENTRY') throw err;
             }
           }
 

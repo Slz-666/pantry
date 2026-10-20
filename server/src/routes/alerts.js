@@ -23,6 +23,7 @@ function toAlert(row) {
     batchId: row.batch_id,
     type: row.type,
     dueDate: row.due_date,
+    daysBefore: row.days_before == null ? 0 : Number(row.days_before),
     status: row.status,
     handledAt: row.handled_at,
     itemId: row.item_id,
@@ -30,7 +31,7 @@ function toAlert(row) {
     unit: row.unit,
     locationId: row.location_id,
     locationName: row.location_name,
-    qty: Number(row.qty),
+    qty: row.qty == null ? 0 : Number(row.qty),
     expireAt: row.expire_at,
     daysLeft: row.days_left == null ? null : Number(row.days_left),
   };
@@ -51,14 +52,16 @@ export default async function alertRoutes(app) {
       params.push(String(status));
     }
     const rows = await query(
-      `SELECT a.id, a.batch_id, a.type, a.due_date, a.status, a.handled_at, a.created_at,
-              b.item_id, b.location_id, b.qty, b.expire_at,
+      `SELECT a.id, a.batch_id, a.type, a.due_date, a.days_before, a.status, a.handled_at, a.created_at,
+              COALESCE(b.item_id, a.item_id) AS item_id,
+              b.location_id, b.qty, b.expire_at,
               i.name AS item_name, i.unit, l.name AS location_name,
               DATEDIFF(a.due_date, CURDATE()) AS days_left
        FROM alert a
-       JOIN batch b ON b.id = a.batch_id AND b.tenant_id = a.tenant_id
-       JOIN item i ON i.id = b.item_id AND i.tenant_id = b.tenant_id
-       JOIN location l ON l.id = b.location_id AND l.tenant_id = b.tenant_id
+       /* 零库存的低库存提醒没有批次，必须 LEFT JOIN，否则整条提醒查不出来 */
+       LEFT JOIN batch b ON b.id = a.batch_id AND b.tenant_id = a.tenant_id
+       LEFT JOIN item i ON i.id = COALESCE(b.item_id, a.item_id) AND i.tenant_id = a.tenant_id
+       LEFT JOIN location l ON l.id = b.location_id AND l.tenant_id = a.tenant_id
        WHERE a.tenant_id = ?${statusCond}
        ORDER BY (a.due_date IS NULL), a.due_date, a.id`,
       params,
@@ -128,6 +131,17 @@ export default async function alertRoutes(app) {
           'UPDATE alert SET status = ?, handled_at = CURRENT_TIMESTAMP WHERE id = ? AND tenant_id = ?',
           [targetStatus, id, tenantId],
         );
+        // 同一批次可能同时挂着 T-30 和 T-7 两条（多节点提前量）：人处理了一条，
+        // 另一条再挂着就是同一件事问两遍，一起关掉。
+        // 不担心「后面的节点不会再来」：节点是按 (batch,type,due_date,days_before) 去重的，
+        // 现在还不存在的那一档，到日子照样会被扫描补上。
+        if (alert.batch_id && alert.type !== 'low_stock') {
+          await conn.execute(
+            `UPDATE alert SET status = ?, handled_at = CURRENT_TIMESTAMP
+              WHERE tenant_id = ? AND batch_id = ? AND type = ? AND status = 'pending' AND id <> ?`,
+            [targetStatus, tenantId, alert.batch_id, alert.type, id],
+          );
+        }
         return { ok: true, idempotent: false, status: targetStatus, stock: stockOut };
       });
 

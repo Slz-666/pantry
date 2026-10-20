@@ -191,7 +191,7 @@ watch(
       </RouterLink>
     </nav>
 
-    <RouterLink to="/add" class="fab" aria-label="记一笔">+</RouterLink>
+    <RouterLink to="/add" class="fab" aria-label="记一笔" />
 
     <div class="toasts">
       <div v-for="t in store.toasts" :key="t.id" class="toast">{{ t.message }}</div>

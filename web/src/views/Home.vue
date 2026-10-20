@@ -2,11 +2,16 @@
 /**
  * 首页（T3.7）：三个问题一屏答完——家里有多少东西、什么快坏了、还有什么待办。
  * 数据全部来自 GET /summary/today（聚合接口，一次请求）。
+ *
+ * 阶段 8 加了一个搜索框（F-1.8）：原来只有「按位置下钻」，用户知道名字却不知道放哪时没法找。
+ * 搜索走 GET /items?q=，名字 / 别名 / 条码都能命中；一旦开始搜，就只显示结果，
+ * 免得「结果 + 快到期」两套列表一起抢注意力。
  */
-import { computed, onMounted, ref } from 'vue';
-import { getCached } from '../api.js';
+import { computed, onMounted, ref, watch } from 'vue';
+import { get, getCached } from '../api.js';
 import { store } from '../store.js';
 import Empty from '../components/Empty.vue';
+import ItemCard from '../components/ItemCard.vue';
 import { expiryClass, expiryText } from '../lib/expiry.js';
 
 const summary = ref(null);
@@ -16,6 +21,33 @@ const errorText = ref('');
 const fromCache = ref(false);
 
 const stocks = computed(() => summary.value?.stocks ?? {});
+
+/* ---------------- 搜索 ---------------- */
+const q = ref('');
+const results = ref([]);
+const searching = ref(false);
+let timer = null;
+
+watch(q, (value) => {
+  clearTimeout(timer);
+  const s = value.trim();
+  if (!s) {
+    results.value = [];
+    searching.value = false;
+    return;
+  }
+  searching.value = true;
+  // 250ms 防抖：边打边查不至于每个字符打一次接口
+  timer = setTimeout(async () => {
+    try {
+      results.value = await get('/items', { q: s, limit: 30 }, { silent: true });
+    } catch {
+      results.value = [];
+    } finally {
+      searching.value = false;
+    }
+  }, 250);
+});
 
 /**
  * T5.4 首页顶部一句话：把「今天该干什么」压缩成一屏可见的一句。
@@ -58,105 +90,141 @@ function qtyOf(n) {
   <div>
     <p v-if="errorText" class="card">{{ errorText }}</p>
 
-    <p v-if="fromCache && store.online === false" class="muted mt-2">
-      离线：下面是上次同步的数据
-    </p>
+    <div class="search-bar">
+      <span class="search-bar__icon">🔍</span>
+      <input
+        v-model="q"
+        class="search-bar__input"
+        type="search"
+        placeholder="搜名字、别名或条码"
+        aria-label="搜索物品"
+      />
+      <button v-if="q" type="button" class="search-bar__clear" @click="q = ''">✕</button>
+    </div>
 
-    <RouterLink v-if="!loading && notice" to="/alerts" class="notice">
-      <span class="notice__dot"></span>
-      <span class="grow">{{ notice }}</span>
-      <span>去处理 →</span>
-    </RouterLink>
-    <p v-else-if="!loading" class="notice notice--ok">
-      <span class="notice__dot"></span>家里东西都在保质期内，清单也空着 👍
-    </p>
-
-    <div class="stats">
-      <div class="stat">
-        <div class="stat__num">{{ qtyOf(stocks.itemCount) }}</div>
-        <div class="stat__label">种物品</div>
+    <!-- 搜索态：只显示结果 -->
+    <template v-if="q.trim()">
+      <div class="section-title"><span>搜到 {{ results.length }} 种</span></div>
+      <div v-if="searching" class="empty">搜索中…</div>
+      <Empty
+        v-else-if="!results.length"
+        icon="🔍"
+        text="没有找到"
+        hint="换个说法，或者用条码搜；也可以直接记一笔"
+      />
+      <div v-else class="list list--table">
+        <RouterLink
+          v-for="it in results"
+          :key="it.id"
+          :to="{ name: 'item', params: { id: it.id } }"
+          class="row-link"
+        >
+          <ItemCard :item="it" />
+        </RouterLink>
       </div>
-      <div class="stat">
-        <div class="stat__num">{{ qtyOf(stocks.batchCount) }}</div>
-        <div class="stat__label">个批次</div>
+    </template>
+
+    <template v-else>
+      <p v-if="fromCache && store.online === false" class="muted mt-2">
+        离线：下面是上次同步的数据
+      </p>
+
+      <RouterLink v-if="!loading && notice" to="/alerts" class="notice">
+        <span class="notice__dot"></span>
+        <span class="grow">{{ notice }}</span>
+        <span>去处理 →</span>
+      </RouterLink>
+      <p v-else-if="!loading" class="notice notice--ok">
+        <span class="notice__dot"></span>家里东西都在保质期内，清单也空着 👍
+      </p>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat__num">{{ qtyOf(stocks.itemCount) }}</div>
+          <div class="stat__label">种物品</div>
+        </div>
+        <div class="stat">
+          <div class="stat__num">{{ qtyOf(stocks.batchCount) }}</div>
+          <div class="stat__label">个批次</div>
+        </div>
+        <div class="stat">
+          <div class="stat__num">{{ qtyOf(stocks.expiringCount) }}</div>
+          <div class="stat__label">7 天内到期</div>
+        </div>
+        <div class="stat">
+          <div class="stat__num" :class="{ 'is-danger': stocks.expiredCount }">
+            {{ qtyOf(stocks.expiredCount) }}
+          </div>
+          <div class="stat__label">已过期</div>
+        </div>
       </div>
-      <div class="stat">
-        <div class="stat__num">{{ qtyOf(stocks.expiringCount) }}</div>
-        <div class="stat__label">7 天内到期</div>
+
+      <div class="section-title">
+        <span>快到期</span>
+        <RouterLink to="/alerts">全部提醒 →</RouterLink>
       </div>
-      <div class="stat">
-        <div class="stat__num" :class="{ 'is-danger': stocks.expiredCount }">
-          {{ qtyOf(stocks.expiredCount) }}
-        </div>
-        <div class="stat__label">已过期</div>
+
+      <div v-if="loading" class="empty">加载中…</div>
+      <Empty
+        v-else-if="!summary?.expiring?.length"
+        icon="✅"
+        text="最近没有快到期的"
+        hint="保持住，别忘了每天看一眼"
+      />
+      <div v-else class="list">
+        <RouterLink
+          v-for="b in summary.expiring"
+          :key="b.batchId"
+          :to="{ name: 'item', params: { id: b.itemId } }"
+          class="row"
+        >
+          <div class="row__main">
+            <div class="row__title">{{ b.itemName }}</div>
+            <div class="row__sub">{{ b.locationName }} · {{ b.qty }} {{ b.unit }}</div>
+          </div>
+          <div class="row__side">
+            <span :class="expiryClass(b.expireAt)">{{ expiryText(b.expireAt) }}</span>
+          </div>
+        </RouterLink>
       </div>
-    </div>
 
-    <div class="section-title">
-      <span>快到期</span>
-      <RouterLink to="/alerts">全部提醒 →</RouterLink>
-    </div>
+      <div class="section-title"><span>位置</span></div>
+      <div class="list">
+        <RouterLink
+          v-for="loc in summary?.locations ?? []"
+          :key="loc.id"
+          :to="{ name: 'location', params: { id: loc.id } }"
+          class="row"
+        >
+          <div class="row__main">
+            <div class="row__title">{{ loc.name }}</div>
+            <div class="row__sub">{{ loc.itemCount }} 种 · {{ loc.qty }} 件</div>
+          </div>
+          <div class="row__side muted">→</div>
+        </RouterLink>
+      </div>
 
-    <div v-if="loading" class="empty">加载中…</div>
-    <Empty
-      v-else-if="!summary?.expiring?.length"
-      icon="✅"
-      text="最近没有快到期的"
-      hint="保持住，别忘了每天看一眼"
-    />
-    <div v-else class="list">
-      <RouterLink
-        v-for="b in summary.expiring"
-        :key="b.batchId"
-        :to="{ name: 'item', params: { id: b.itemId } }"
-        class="row"
-      >
-        <div class="row__main">
-          <div class="row__title">{{ b.itemName }}</div>
-          <div class="row__sub">{{ b.locationName }} · {{ b.qty }} {{ b.unit }}</div>
-        </div>
-        <div class="row__side">
-          <span :class="expiryClass(b.expireAt)">{{ expiryText(b.expireAt) }}</span>
-        </div>
-      </RouterLink>
-    </div>
-
-    <div class="section-title"><span>位置</span></div>
-    <div class="list">
-      <RouterLink
-        v-for="loc in summary?.locations ?? []"
-        :key="loc.id"
-        :to="{ name: 'location', params: { id: loc.id } }"
-        class="row"
-      >
-        <div class="row__main">
-          <div class="row__title">{{ loc.name }}</div>
-          <div class="row__sub">{{ loc.itemCount }} 种 · {{ loc.qty }} 件</div>
-        </div>
-        <div class="row__side muted">→</div>
-      </RouterLink>
-    </div>
-
-    <div class="section-title"><span>待办</span></div>
-    <div class="list">
-      <RouterLink to="/alerts" class="row">
-        <div class="row__main">
-          <div class="row__title">待处理提醒</div>
-          <div class="row__sub">到期、开封过期、低库存</div>
-        </div>
-        <div class="row__side">
-          <span class="badge">{{ qtyOf(stocks.pendingAlertCount) }}</span>
-        </div>
-      </RouterLink>
-      <RouterLink to="/shopping" class="row">
-        <div class="row__main">
-          <div class="row__title">待买的</div>
-          <div class="row__sub">购物清单</div>
-        </div>
-        <div class="row__side">
-          <span class="badge">{{ qtyOf(stocks.pendingShoppingCount) }}</span>
-        </div>
-      </RouterLink>
-    </div>
+      <div class="section-title"><span>待办</span></div>
+      <div class="list">
+        <RouterLink to="/alerts" class="row">
+          <div class="row__main">
+            <div class="row__title">待处理提醒</div>
+            <div class="row__sub">到期、开封过期、低库存</div>
+          </div>
+          <div class="row__side">
+            <span class="badge">{{ qtyOf(stocks.pendingAlertCount) }}</span>
+          </div>
+        </RouterLink>
+        <RouterLink to="/shopping" class="row">
+          <div class="row__main">
+            <div class="row__title">待买的</div>
+            <div class="row__sub">购物清单</div>
+          </div>
+          <div class="row__side">
+            <span class="badge">{{ qtyOf(stocks.pendingShoppingCount) }}</span>
+          </div>
+        </RouterLink>
+      </div>
+    </template>
   </div>
 </template>

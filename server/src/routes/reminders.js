@@ -10,7 +10,8 @@
 import { query } from '../db.js';
 import { fail } from '../lib/http.js';
 import { jsonArray } from '../lib/json.js';
-import { CATEGORY_LIST } from '../services/normalize.js';
+// 分类可以是用户自定义的（F-5.2），所以校验走 category 表而不是硬编码数组
+import { categoryExists, categoryNames } from '../services/categories.js';
 
 const MAX_NODES = 8;
 
@@ -62,8 +63,9 @@ export default async function reminderRoutes(app) {
     const body = req.body || {};
     const tenantId = req.user.tenantId;
     const category = String(body.category ?? '').trim();
-    if (!CATEGORY_LIST.includes(category)) {
-      return fail(reply, 400, 'BAD_REQUEST', `品类只能是：${CATEGORY_LIST.join('/')}`);
+    if (!(await categoryExists(tenantId, category))) {
+      const names = await categoryNames(tenantId);
+      return fail(reply, 400, 'BAD_REQUEST', `品类不存在，可选：${names.join('/')}`);
     }
     const d = normalizeDays(body.daysBefore);
     if (d.error) return fail(reply, 400, 'BAD_REQUEST', d.error);

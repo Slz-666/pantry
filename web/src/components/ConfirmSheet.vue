@@ -36,6 +36,7 @@ function blank() {
     category: '',
     locationId: '',
     expireAt: '',
+    barcode: '',
     opened: false,
     // 下面这些都是「提示信息」，不参与提交
     locationHint: '',
@@ -87,6 +88,7 @@ watch(
         category: it.category || '',
         locationId: it.locationId == null ? '' : String(it.locationId),
         expireAt: it.expireAt || '',
+        barcode: it.barcode || '',
         opened: Boolean(it.opened),
         locationHint: it.locationHint || '',
         datePhrase: it.datePhrase || '',
@@ -138,6 +140,8 @@ function submit() {
       category: it.category || null,
       locationId: Number(it.locationId),
       expireAt: it.expireAt || null,
+      // 条码可选：扫一次之后就能按码搜到（F-1.1 / F-1.8）
+      barcode: it.barcode ? String(it.barcode).trim() : null,
       opened: Boolean(it.opened),
     })),
   );
@@ -220,6 +224,11 @@ function submit() {
               <span class="field__label">到期日</span>
               <input v-model="it.expireAt" class="input" type="date" />
             </label>
+
+            <label class="field">
+              <span class="field__label">条码</span>
+              <input v-model="it.barcode" class="input" inputmode="numeric" placeholder="有就填，之后能扫码搜" />
+            </label>
           </div>
 
           <!-- 人兜底的提示：把模型「不敢算」的东西指出来，但不替用户填 -->
@@ -235,7 +244,7 @@ function submit() {
           <p v-if="it.expireAt" :class="expiryClass(it.expireAt)">{{ expiryText(it.expireAt) }}</p>
           <p v-if="it.duplicate" class="entry-hint entry-hint--info">
             已有同批次：{{ it.duplicate.expireAt ? `到期 ${it.duplicate.expireAt}` : '无到期日' }}，
-            共 {{ it.duplicate.qty }} —— 确认后会合并进那一条
+            共 {{ it.duplicate.qty }} —— 确认后会作为同一物品的新批次记入（不覆盖原来那批）
           </p>
 
           <label class="checkbox">

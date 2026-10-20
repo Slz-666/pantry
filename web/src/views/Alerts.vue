@@ -110,8 +110,15 @@ onMounted(load);
             <div class="row__title">
               {{ a.itemName }}
               <span class="badge">{{ TYPE_TEXT[a.type] || a.type }}</span>
+              <span v-if="a.type !== 'low_stock' && a.daysBefore > 0" class="badge badge--warn">
+                提前 {{ a.daysBefore }} 天
+              </span>
             </div>
-            <div class="row__sub">{{ a.locationName }} · {{ a.qty }} {{ a.unit }}</div>
+            <div class="row__sub">
+              <template v-if="a.locationName">{{ a.locationName }} · </template>
+              <template v-if="a.batchId">{{ a.qty }} {{ a.unit }}</template>
+              <template v-else>家里已经没有了</template>
+            </div>
           </div>
           <div class="row__side">
             <span v-if="a.type === 'low_stock'" class="muted">库存低于补货线</span>

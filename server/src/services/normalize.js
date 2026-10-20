@@ -246,6 +246,8 @@ export function normalizeDraft(raw, ctx = {}) {
   const locations = ctx.locations || [];
   const items = ctx.items || [];
   const batches = ctx.batches || [];
+  // 分类是租户可自定义的（category 表），调用方没给时退回默认 8 类
+  const categories = Array.isArray(ctx.categories) && ctx.categories.length ? ctx.categories : CATEGORY_LIST;
 
   const rawItems = Array.isArray(raw?.items) ? raw.items : [];
   const rawMissing = Array.isArray(raw?.missing) ? raw.missing.map(String) : [];
@@ -326,7 +328,7 @@ export function normalizeDraft(raw, ctx = {}) {
       spec: r.spec ? String(r.spec).trim() : null,
       qty: qty.value,
       unit: unit.value,
-      category: CATEGORY_LIST.includes(r.category) ? r.category : null,
+      category: categories.includes(r.category) ? r.category : null,
       opened: Boolean(r.opened),
       expireAt,
       datePhrase,

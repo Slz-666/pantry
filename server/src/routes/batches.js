@@ -12,8 +12,11 @@ import { query } from '../db.js';
 import { fail } from '../lib/http.js';
 import { OpError, stockIn, stockInTx, runWrite, consume, discard, adjust, move } from '../services/inventory.js';
 import { subtreeIds } from './locations.js';
+import { UNIT_LIST, todayString } from '../services/normalize.js';
+import { categoryNames } from '../services/categories.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const BARCODE_RE = /^[0-9A-Za-z-]{4,64}$/;
 
 /** DATE 参数：允许 null（清空），字符串必须是 YYYY-MM-DD，不许让 DB 猜。 */
 function dateArg(value, field) {
@@ -21,6 +24,24 @@ function dateArg(value, field) {
   const s = String(value);
   if (!DATE_RE.test(s)) throw new OpError(400, 'BAD_REQUEST', `${field} 格式必须是 YYYY-MM-DD`);
   return s;
+}
+
+/**
+ * 开封时间的两种入参：
+ * - openedAt：手里已经有具体时间（详情页改批次）
+ * - opened: true：手工录入的复选框，只表示「已经开封了」，时间就记今天零点
+ * 之前只读 openedAt，前端传的 opened 被静默丢掉，导致「开封到期」提醒永远不触发。
+ */
+function openedArg(body) {
+  if (body.openedAt) {
+    const s = String(body.openedAt);
+    if (!/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?$/.test(s)) {
+      throw new OpError(400, 'BAD_REQUEST', 'openedAt 格式必须是 YYYY-MM-DD 或 YYYY-MM-DD HH:mm:ss');
+    }
+    return s.replace('T', ' ');
+  }
+  if (body.opened === true) return `${todayString()} 00:00:00`;
+  return null;
 }
 
 /** 把服务层的 OpError 转成统一 { code, message }；其他错误交给全局处理器。 */
@@ -137,6 +158,7 @@ export default async function batchRoutes(app) {
     try {
       const expireAt = dateArg(body.expireAt, 'expireAt');
       const producedAt = dateArg(body.producedAt, 'producedAt');
+      const openedAt = openedArg(body);
 
       if (body.itemId != null) {
         const out = await stockIn({
@@ -147,7 +169,7 @@ export default async function batchRoutes(app) {
           qty: body.qty,
           producedAt,
           expireAt,
-          openedAt: body.openedAt ?? null,
+          openedAt,
           note: body.note ?? null,
           clientOpId: body.clientOpId,
         });
@@ -159,12 +181,29 @@ export default async function batchRoutes(app) {
       if (!name) throw new OpError(400, 'BAD_REQUEST', '缺少 itemId，或者给一个物品名称');
       if (name.length > 64) throw new OpError(400, 'BAD_REQUEST', '物品名称最多 64 个字');
       const spec = body.spec ? String(body.spec).trim().slice(0, 32) : null;
-      const unit = body.unit ? String(body.unit) : '个';
-      const category = body.category || null;
+      // 单位和分类都要过白名单：以前只有前端限制，直接打接口就能把「吨」「随便」写进库，
+      // 之后列表、提醒规则全都被这条脏数据带偏（验收测试实测能绕过）
+      const unit = body.unit ? String(body.unit).trim() : '个';
+      if (!UNIT_LIST.includes(unit)) {
+        throw new OpError(400, 'BAD_REQUEST', `单位只能是：${UNIT_LIST.join('/')}`);
+      }
+      const names = await categoryNames(tenantId);
+      if (body.category != null && body.category !== '' && !names.includes(String(body.category))) {
+        throw new OpError(400, 'BAD_REQUEST', `分类不存在，可选：${names.join('/')}`);
+      }
+      const category = body.category ? String(body.category) : names[0] || '其他';
 
+      const barcode = body.barcode ? String(body.barcode).trim() : null;
+      if (barcode && !BARCODE_RE.test(barcode)) {
+        throw new OpError(400, 'BAD_REQUEST', '条码只能是 4–64 位的数字、字母或横线');
+      }
+
+      // 手动录入时前端要知道最后落到哪个物品档案上（跳详情页 / 建最近常用），
+      // 所以把事务里定下来的 itemId 带回外层
+      let resolvedItemId = null;
       const out = await runWrite(tenantId, body.clientOpId, async (conn) => {
         let [rows] = await conn.execute(
-          `SELECT id FROM item
+          `SELECT id, barcode FROM item
             WHERE tenant_id = ? AND name = ? AND deleted_at IS NULL
             ORDER BY (spec <=> ?) DESC, id
             LIMIT 1`,
@@ -174,15 +213,15 @@ export default async function batchRoutes(app) {
         if (!itemId) {
           try {
             const [ins] = await conn.execute(
-              'INSERT INTO item (tenant_id, name, spec, unit, category) VALUES (?, ?, ?, ?, ?)',
-              [tenantId, name, spec, unit, category],
+              'INSERT INTO item (tenant_id, name, spec, unit, category, barcode) VALUES (?, ?, ?, ?, ?, ?)',
+              [tenantId, name, spec, unit, category, barcode],
             );
             itemId = ins.insertId;
           } catch (err) {
             // 并发建同名物品：唯一键挡住后重新取一次，接着入库即可
             if (err.code !== 'ER_DUP_ENTRY') throw err;
             [rows] = await conn.execute(
-              `SELECT id FROM item
+              `SELECT id, barcode FROM item
                 WHERE tenant_id = ? AND name = ? AND deleted_at IS NULL
                 ORDER BY (spec <=> ?) DESC, id
                 LIMIT 1`,
@@ -191,7 +230,11 @@ export default async function batchRoutes(app) {
             itemId = rows[0]?.id;
             if (!itemId) throw err;
           }
+        } else if (barcode && !rows[0].barcode) {
+          // 老档案没条码、这次扫了：补上，下次就能直接扫出来
+          await conn.execute('UPDATE item SET barcode = ? WHERE id = ? AND tenant_id = ?', [barcode, itemId, tenantId]);
         }
+        resolvedItemId = itemId;
         return stockInTx(conn, {
           tenantId,
           memberId,
@@ -200,12 +243,12 @@ export default async function batchRoutes(app) {
           qty: body.qty,
           producedAt,
           expireAt,
-          openedAt: body.openedAt ?? null,
+          openedAt,
           note: body.note ?? null,
           clientOpId: body.clientOpId,
         });
       });
-      return reply.code(201).send({ ok: true, ...out });
+      return reply.code(201).send({ ok: true, itemId: resolvedItemId, ...out });
     } catch (err) {
       return handleOpError(reply, err);
     }
@@ -281,6 +324,10 @@ export default async function batchRoutes(app) {
       }
 
       // 元信息（日期/备注）：允许单独改，也允许和数量/位置一起改
+      // opened 布尔是前端复选框的写法（true=开封、false=取消开封），统一折算成 opened_at
+      if (body.opened !== undefined && body.openedAt === undefined) {
+        body.openedAt = body.opened ? `${todayString()} 00:00:00` : null;
+      }
       const metaFields = { expireAt: 'expire_at', producedAt: 'produced_at', openedAt: 'opened_at', note: 'note' };
       const sets = [];
       const params = [];
@@ -325,8 +372,10 @@ export default async function batchRoutes(app) {
     params.push(n, off);
     const rows = await query(
       `SELECT s.id, s.batch_id, s.item_id, s.location_id, s.type, s.qty_delta, s.qty_before,
-              s.qty_after, s.reason, s.client_op_id, s.created_at
+              s.qty_after, s.reason, s.client_op_id, s.created_at, s.operator_member_id,
+              m.display_name AS operator_name
        FROM stock_log s
+       LEFT JOIN member m ON m.id = s.operator_member_id AND m.tenant_id = s.tenant_id
        WHERE ${wheres.join(' AND ')}
        ORDER BY s.id DESC
        LIMIT ? OFFSET ?`,
@@ -343,6 +392,9 @@ export default async function batchRoutes(app) {
       qtyAfter: Number(r.qty_after),
       reason: r.reason,
       clientOpId: r.client_op_id,
+      // 谁改的（F-1.6）：家里不止一个人用时，流水必须能追到人
+      operatorId: r.operator_member_id,
+      operatorName: r.operator_name ?? null,
       createdAt: r.created_at,
     }));
   });

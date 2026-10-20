@@ -2,11 +2,15 @@
 # 服务端冒烟测试：健康检查 + 登录鉴权 + 位置/物品 CRUD 两条硬约束。
 # 跑法（Git Bash 或 WSL）：bash server/scripts/smoke.sh
 #   若 node 不在 PATH：NODE=/c/Users/<你>/.workbuddy/binaries/node/versions/24.14.0/node.exe bash server/scripts/smoke.sh
-# 前置：8787 服务在跑、3307 数据库可用、admin/pantry123 能登录
+# 前置：8443 服务在跑（.env 里开了 HTTPS_CERT/HTTPS_KEY）、3307 数据库可用、admin/pantry123 能登录
+#      想跑 HTTP 实例就显式覆盖：BASE=http://127.0.0.1:8787 bash server/scripts/smoke.sh
 # 注意：所有 JSON body 走临时文件传（--data-binary @file），避免 shell 引号/编码问题
 set -uo pipefail
 
-BASE="${BASE:-http://127.0.0.1:8787}"
+# 生产形态是 HTTPS（手机要 8443），自签证书 curl 不认，统一给 curl 加 -k
+curl() { command curl -k "$@"; }
+
+BASE="${BASE:-https://127.0.0.1:8443}"
 NODE="${NODE:-node}"
 FAILED=0
 

@@ -261,16 +261,39 @@ button {
   right: var(--sp-4);
   bottom: calc(var(--tabbar-h) + var(--sp-4) + env(safe-area-inset-bottom));
   z-index: 11;
+  /* 加号用两根线画（见下面的 ::before/::after），所以这里靠 grid 居中。
+     a 元素默认 display:block，只靠 line-height 居中会把字形顶到左上角。 */
+  display: grid;
+  place-items: center;
   width: 54px;
   height: 54px;
+  padding: 0;
   border: none;
   border-radius: var(--r-round);
   background: var(--c-primary);
   color: var(--c-primary-ink);
-  font-size: 28px;
-  font-weight: 300;
-  line-height: 1;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
   box-shadow: var(--shadow-fab);
+}
+
+/* 十字两根都落在同一个格子里，天然同心，换字体也不会偏 */
+.fab::before,
+.fab::after {
+  content: '';
+  grid-area: 1 / 1;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.fab::before {
+  width: 20px;
+  height: 2px;
+}
+
+.fab::after {
+  width: 2px;
+  height: 20px;
 }
 
 .fab:active {
@@ -1386,7 +1409,8 @@ select.input {
   flex: 1;
 }
 
-/* 提醒规则行（设置页）：一条品类一行，展开成两个输入框 */.rule {
+/* 提醒规则行（设置页）：一条品类一行，展开成两个输入框 */
+.rule {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -1421,4 +1445,177 @@ select.input {
   gap: 6px;
   font-size: var(--fs-2);
   color: var(--c-text-2);
+}
+
+/* ============================================================
+ * 阶段 8：验收修复（搜索 / 低库存标红 / 详情操作 / 位置与分类管理）
+ * ============================================================ */
+
+/* ---------- 搜索框（首页、位置页共用） ---------- */
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-2);
+  background: var(--c-surface);
+}
+
+.search-bar:focus-within {
+  border-color: var(--c-primary);
+  box-shadow: var(--ring-primary);
+}
+
+.search-bar__icon {
+  color: var(--c-text-3);
+  font-size: var(--fs-3);
+}
+
+.search-bar__input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-text);
+  font: inherit;
+}
+
+.search-bar__input:focus {
+  outline: none;
+}
+
+.search-bar__clear {
+  border: 0;
+  background: transparent;
+  color: var(--c-text-3);
+  font-size: var(--fs-3);
+  cursor: pointer;
+  padding: var(--sp-1);
+}
+
+/* ---------- 低库存标红（F-1.9） ---------- */
+
+.badge--danger {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+.badge--warn {
+  background: var(--c-warn-soft);
+  color: var(--c-warn);
+}
+
+.qty--low {
+  color: var(--c-danger);
+}
+
+/* ---------- 批次卡（带操作按钮） ---------- */
+
+.batch-card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-2);
+  padding: var(--sp-1) var(--sp-4) var(--sp-1);
+}
+
+.batch-card .row {
+  border: 0;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.batch-card .row-actions {
+  padding: 0 0 var(--sp-2);
+}
+
+/* 详情页顶部一组操作 */
+.detail-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+/* ---------- 位置 / 分类管理（设置页） ---------- */
+
+.mgr {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--sp-2);
+}
+
+.mgr__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+}
+
+.mgr__row:hover {
+  background: var(--c-surface-2);
+  border-color: var(--c-border);
+}
+
+.mgr__row.is-dragging {
+  opacity: 0.4;
+}
+
+.mgr__row.is-over {
+  border-color: var(--c-primary);
+  background: var(--c-primary-softer);
+}
+
+.mgr__grip {
+  color: var(--c-text-3);
+  cursor: grab;
+  user-select: none;
+  font-size: var(--fs-2);
+}
+
+.mgr__name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mgr__acts {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.mgr__acts .btn {
+  min-height: 28px;
+  padding: 0 6px;
+  font-size: var(--fs-1);
+  font-weight: 500;
+}
+
+.inline-form {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.inline-form .input {
+  flex: 1;
+  min-height: 36px;
+}
+
+/* 手机上拖拽不好用：给一组上下移动按钮，另加一行提示 */
+.touch-hint {
+  color: var(--c-text-3);
+  font-size: var(--fs-1);
 }

@@ -20,6 +20,9 @@ const loading = ref(false);
 const errorText = ref('');
 /** 这一屏是不是缓存数据（离线时给一句说明） */
 const fromCache = ref(false);
+/** 位置内搜索（F-1.8）：只筛当前位置子树里的东西，q 交给后端做名字/别名/条码匹配 */
+const q = ref('');
+let timer = null;
 
 const currentId = computed(() => (route.params.id ? Number(route.params.id) : null));
 
@@ -49,6 +52,7 @@ async function load() {
   errorText.value = '';
   loading.value = true;
   const params = currentId.value == null ? {} : { locationId: currentId.value };
+  if (q.value.trim()) params.q = q.value.trim();
   try {
     // 先给这个位置的缓存、再拉网络覆盖（T6.4）：下钻时不会每次白屏
     await getCached('/items', params, (data, meta) => {
@@ -65,6 +69,11 @@ async function load() {
 }
 
 watch(currentId, load, { immediate: true });
+
+watch(q, () => {
+  clearTimeout(timer);
+  timer = setTimeout(load, 250);
+});
 
 function goParent() {
   if (parentId.value == null) router.push({ name: 'location' });
@@ -84,20 +93,34 @@ function goParent() {
     <p v-if="errorText" class="card">{{ errorText }}</p>
     <p v-if="fromCache && store.online === false" class="muted mb-2">离线：下面是上次同步的数据</p>
 
-    <div v-if="children.length" class="section-title"><span>子位置</span></div>
-    <div v-if="children.length" class="list">
-      <RouterLink
-        v-for="child in children"
-        :key="child.id"
-        :to="{ name: 'location', params: { id: child.id } }"
-        class="row"
-      >
-        <div class="row__main">
-          <div class="row__title">{{ child.name }}</div>
-        </div>
-        <div class="row__side muted">→</div>
-      </RouterLink>
+    <div class="search-bar">
+      <span class="search-bar__icon">🔍</span>
+      <input
+        v-model="q"
+        class="search-bar__input"
+        type="search"
+        :placeholder="currentNode ? `在「${currentNode.name}」里搜` : '搜全部物品'"
+        aria-label="搜索物品"
+      />
+      <button v-if="q" type="button" class="search-bar__clear" @click="q = ''">✕</button>
     </div>
+
+    <template v-if="!q.trim()">
+      <div v-if="children.length" class="section-title"><span>子位置</span></div>
+      <div v-if="children.length" class="list">
+        <RouterLink
+          v-for="child in children"
+          :key="child.id"
+          :to="{ name: 'location', params: { id: child.id } }"
+          class="row"
+        >
+          <div class="row__main">
+            <div class="row__title">{{ child.name }}</div>
+          </div>
+          <div class="row__side muted">→</div>
+        </RouterLink>
+      </div>
+    </template>
 
     <div class="section-title">
       <span>物品（{{ items.length }} 种 · {{ totalQty }} 件）</span>

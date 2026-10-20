@@ -20,6 +20,7 @@ import summaryRoutes from './routes/summary.js';
 import extractRoutes from './routes/extract.js';
 import metaRoutes from './routes/meta.js';
 import reminderRoutes from './routes/reminders.js';
+import categoryRoutes from './routes/categories.js';
 
 /**
  * 生产形态（HANDOFF 阶段 7 / DEV-PLAN T7.2、T7.3）：
@@ -117,6 +118,7 @@ await app.register(summaryRoutes, { prefix: '/api' });
 await app.register(extractRoutes, { prefix: '/api' });
 await app.register(metaRoutes, { prefix: '/api' });
 await app.register(reminderRoutes, { prefix: '/api' });
+await app.register(categoryRoutes, { prefix: '/api' });
 
 /**
  * T5.1 每天早 8:00 扫一遍提醒（到期 / 开封后到期 / 低库存）。
@@ -162,4 +164,18 @@ try {
 } catch (err) {
   app.log.error(err);
   process.exit(1);
+}
+
+// 开了 HTTPS 之后 PORT（默认 8787）就空出来了，但电脑上的旧书签还写着 http://localhost:8787。
+// 这里补一个极轻的 301 跳转，让旧地址不至于直接打不开——省得用户以为服务挂了。
+const plainPort = Number(process.env.PORT || 8787);
+if (useHttps && plainPort !== port) {
+  const { createServer } = await import('node:http');
+  const redirect = createServer((req, res) => {
+    const hostname = (req.headers.host || 'localhost').split(':')[0];
+    res.writeHead(301, { Location: `https://${hostname}:${port}${req.url || '/'}` });
+    res.end();
+  });
+  redirect.on('error', (err) => app.log.warn({ err }, 'http redirect listener failed'));
+  redirect.listen(plainPort, host, () => app.log.info({ port: plainPort, to: port }, 'http → https redirect on'));
 }

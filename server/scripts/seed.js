@@ -31,6 +31,18 @@ if (!tenantId) {
   console.log(`tenant exists: ${TENANT_NAME} (id=${tenantId})`);
 }
 
+// ---- 分类（默认 8 类，用户之后可以在「我的 → 分类管理」里增删改）----
+const DEFAULT_CATEGORIES = ['食品', '日用品', '药品', '护肤品', '清洁用品', '宠物用品', '工具', '其他'];
+for (let i = 0; i < DEFAULT_CATEGORIES.length; i++) {
+  await conn.query('INSERT IGNORE INTO category (tenant_id, name, sort_order) VALUES (?, ?, ?)', [
+    tenantId,
+    DEFAULT_CATEGORIES[i],
+    i + 1,
+  ]);
+}
+const [[{ catCount }]] = await conn.query('SELECT COUNT(*) AS catCount FROM category WHERE tenant_id = ?', [tenantId]);
+console.log(`categories ready: ${catCount}`);
+
 // ---- 管理员账号 ----
 let [members] = await conn.query('SELECT id FROM member WHERE tenant_id = ? AND username = ? LIMIT 1', [
   tenantId,

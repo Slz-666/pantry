@@ -12,13 +12,20 @@ import { query } from '../db.js';
 import { fail } from '../lib/http.js';
 import { jsonArray } from '../lib/json.js';
 import { subtreeIds } from './locations.js';
-// 单位/分类白名单只有一份（在 normalize.js）：录入校验和手工编辑必须同一套标准，
+// 单位白名单只有一份（在 normalize.js）：录入校验和手工编辑必须同一套标准，
 // 否则会出现「Agent 能录进去、手工改不回来」的割裂。
+// 分类则相反：默认名单在 normalize.js，但用户可以在 category 表里自定义，
+// 所以校验必须走数据库（categories.js），不能用硬编码数组。
 import { CATEGORY_LIST, UNIT_LIST } from '../services/normalize.js';
+import { categoryNames } from '../services/categories.js';
 
 export { CATEGORY_LIST, UNIT_LIST };
 
+const BARCODE_RE = /^[0-9A-Za-z-]{4,64}$/;
+
 function toItem(row) {
+  const totalQty = Number(row.total_qty ?? 0);
+  const threshold = row.low_stock_threshold == null ? null : Number(row.low_stock_threshold);
   return {
     id: row.id,
     name: row.name,
@@ -26,12 +33,16 @@ function toItem(row) {
     unit: row.unit,
     category: row.category,
     aliases: safeJson(row.aliases),
+    barcode: row.barcode ?? null,
     defaultLocationId: row.default_location_id,
     locationName: row.location_name ?? null,
     shelfLifeDays: row.shelf_life_days,
-    lowStockThreshold: row.low_stock_threshold,
+    lowStockThreshold: threshold,
+    // 低库存标记（F-1.9）：前端只认这个布尔值，不再自己拿阈值和总数比大小，
+    // 否则「提醒说低库存、列表没标红」这类口径不一致迟早再出现
+    lowStock: threshold != null && totalQty <= threshold,
     note: row.note,
-    totalQty: Number(row.total_qty ?? 0),
+    totalQty,
     earliestExpireAt: row.earliest_expire_at,
     batchCount: Number(row.batch_count ?? 0),
   };
@@ -45,14 +56,22 @@ function safeJson(text) {
 function validUnit(unit) {
   return unit == null || UNIT_LIST.includes(unit);
 }
-function validCategory(category) {
-  return category == null || CATEGORY_LIST.includes(category);
+
+/** 条码：空值允许（清空），有值则必须是 4–64 位的数字/字母/横线（扫码枪和手输都能过） */
+function barcodeArg(value) {
+  if (value === undefined || value === null || value === '') return { ok: true, value: null };
+  const s = String(value).trim();
+  if (!BARCODE_RE.test(s)) {
+    return { ok: false, message: '条码只能是 4–64 位的数字、字母或横线' };
+  }
+  return { ok: true, value: s };
 }
 
 export default async function itemRoutes(app) {
-  // 列表：支持 q（名字/别名模糊）、category、locationId（含子位置）、expiringIn（N 天内到期）
+  // 列表：支持 q（名字/别名/条码模糊）、barcode（条码精确，扫码枪用）、
+  // category、locationId（含子位置）、expiringIn（N 天内到期）
   app.get('/items', async (req) => {
-    const { q, category, locationId, expiringIn, limit = 50, offset = 0 } = req.query || {};
+    const { q, barcode, category, locationId, expiringIn, limit = 50, offset = 0 } = req.query || {};
     const tenantId = req.user.tenantId;
 
     // 占位符按 SQL 文本里出现的顺序排：JOIN 里的（位置子树）在 WHERE 之前，
@@ -63,9 +82,15 @@ export default async function itemRoutes(app) {
     const params = [tenantId];
 
     if (q) {
-      wheres.push('(i.name LIKE ? OR i.aliases LIKE ?)');
+      // 条码也参与模糊搜索（T2.4）：用户手里只有包装上的数字时，输入框一个就够
+      wheres.push('(i.name LIKE ? OR i.aliases LIKE ? OR i.barcode LIKE ?)');
       const like = `%${q}%`;
-      params.push(like, like);
+      params.push(like, like, like);
+    }
+    if (barcode) {
+      // 精确匹配：扫码枪扫出来的就是一整串码，模糊匹配会顺带出别的
+      wheres.push('i.barcode = ?');
+      params.push(String(barcode).trim());
     }
     if (category) {
       wheres.push('i.category = ?');
@@ -93,7 +118,7 @@ export default async function itemRoutes(app) {
     const having = locationId ? 'HAVING total_qty > 0' : '';
 
     const sql = `
-      SELECT i.id, i.name, i.spec, i.unit, i.category, i.aliases,
+      SELECT i.id, i.name, i.spec, i.unit, i.category, i.aliases, i.barcode,
              i.default_location_id, i.shelf_life_days, i.low_stock_threshold, i.note,
              MAX(l.name) AS location_name,
              COALESCE(SUM(b.qty), 0) AS total_qty,
@@ -113,12 +138,45 @@ export default async function itemRoutes(app) {
     return rows.map(toItem);
   });
 
+  /**
+   * 最近记过的物品（F-2.6 一键复购）：按「最近一次入库流水」倒序。
+   * 为什么不按 item.updated_at：改个备注也算更新，排出来的不是「最近买的东西」。
+   */
+  app.get('/recent-items', async (req) => {
+    const tenantId = req.user.tenantId;
+    const limit = Math.min(Number(req.query?.limit) || 6, 20);
+    const rows = await query(
+      `SELECT i.id, i.name, i.spec, i.unit, i.category, i.barcode, i.default_location_id,
+              MAX(s.created_at) AS last_at,
+              COALESCE(SUM(b.qty), 0) AS total_qty
+         FROM stock_log s
+         JOIN item i ON i.id = s.item_id AND i.tenant_id = s.tenant_id
+         LEFT JOIN batch b ON b.item_id = i.id AND b.tenant_id = i.tenant_id AND b.status = 'active'
+        WHERE s.tenant_id = ? AND s.type IN ('in', 'extract_in') AND i.deleted_at IS NULL
+        GROUP BY i.id
+        ORDER BY last_at DESC
+        LIMIT ?`,
+      [tenantId, limit],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      spec: r.spec,
+      unit: r.unit,
+      category: r.category,
+      barcode: r.barcode,
+      defaultLocationId: r.default_location_id,
+      totalQty: Number(r.total_qty),
+      lastAt: r.last_at,
+    }));
+  });
+
   // 详情：物品档案 + 全部批次（含位置名），按创建时间倒序
   app.get('/items/:id', async (req, reply) => {
     const id = Number(req.params.id);
     const tenantId = req.user.tenantId;
     const items = await query(
-      `SELECT i.id, i.name, i.spec, i.unit, i.category, i.aliases,
+      `SELECT i.id, i.name, i.spec, i.unit, i.category, i.aliases, i.barcode,
               i.default_location_id, i.shelf_life_days, i.low_stock_threshold, i.note,
               MAX(l.name) AS location_name,
               COALESCE(SUM(b.qty), 0) AS total_qty,
@@ -167,7 +225,12 @@ export default async function itemRoutes(app) {
     if (name.length > 64) return fail(reply, 400, 'BAD_REQUEST', '物品名称不能超过 64 字');
     if (!body.unit) return fail(reply, 400, 'BAD_REQUEST', '单位必填');
     if (!validUnit(body.unit)) return fail(reply, 400, 'BAD_REQUEST', `单位只能是：${UNIT_LIST.join('/')}`);
-    if (!validCategory(body.category)) return fail(reply, 400, 'BAD_REQUEST', `分类只能是：${CATEGORY_LIST.join('/')}`);
+    const names = await categoryNames(tenantId);
+    if (body.category != null && body.category !== '' && !names.includes(String(body.category))) {
+      return fail(reply, 400, 'BAD_REQUEST', `分类不存在，可选：${names.join('/')}`);
+    }
+    const code = barcodeArg(body.barcode);
+    if (!code.ok) return fail(reply, 400, 'BAD_REQUEST', code.message);
     if (body.aliases !== undefined && !Array.isArray(body.aliases)) {
       return fail(reply, 400, 'BAD_REQUEST', 'aliases 必须是数组');
     }
@@ -181,16 +244,17 @@ export default async function itemRoutes(app) {
 
     try {
       const result = await query(
-        `INSERT INTO item (tenant_id, name, spec, unit, category, aliases, default_location_id,
+        `INSERT INTO item (tenant_id, name, spec, unit, category, aliases, barcode, default_location_id,
                            shelf_life_days, low_stock_threshold, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           tenantId,
           name,
           body.spec ?? null,
           body.unit ?? null,
-          body.category ?? '其他',
+          body.category || names[0] || '其他',
           JSON.stringify(body.aliases ?? []),
+          code.value,
           body.defaultLocationId ?? null,
           body.shelfLifeDays ?? null,
           body.lowStockThreshold ?? null,
@@ -199,7 +263,7 @@ export default async function itemRoutes(app) {
       );
       return reply.code(201).send({ id: result.insertId });
     } catch (err) {
-      if (err.code === 'ER_DUP_ENTRY') return fail(reply, 409, 'CONFLICT', '同名同规格的物品已存在');
+      if (err.code === 'ER_DUP_ENTRY') return fail(reply, 409, 'CONFLICT', '同名同规格的物品（或同一条码）已存在');
       throw err;
     }
   });
@@ -218,7 +282,12 @@ export default async function itemRoutes(app) {
     if (body.name === null) return fail(reply, 400, 'BAD_REQUEST', '物品名称不能置空');
     if (body.unit === null) return fail(reply, 400, 'BAD_REQUEST', '单位不能置空');
     if (!validUnit(body.unit)) return fail(reply, 400, 'BAD_REQUEST', `单位只能是：${UNIT_LIST.join('/')}`);
-    if (!validCategory(body.category)) return fail(reply, 400, 'BAD_REQUEST', `分类只能是：${CATEGORY_LIST.join('/')}`);
+    const names = await categoryNames(tenantId);
+    if (body.category != null && body.category !== '' && !names.includes(String(body.category))) {
+      return fail(reply, 400, 'BAD_REQUEST', `分类不存在，可选：${names.join('/')}`);
+    }
+    const code = barcodeArg(body.barcode);
+    if (!code.ok) return fail(reply, 400, 'BAD_REQUEST', code.message);
     if (body.defaultLocationId != null) {
       const loc = await query('SELECT id FROM location WHERE id = ? AND tenant_id = ?', [body.defaultLocationId, tenantId]);
       if (!loc.length) return fail(reply, 400, 'BAD_REQUEST', '默认位置不存在');
@@ -230,6 +299,7 @@ export default async function itemRoutes(app) {
       unit: 'unit',
       category: 'category',
       aliases: 'aliases',
+      barcode: 'barcode',
       defaultLocationId: 'default_location_id',
       shelfLifeDays: 'shelf_life_days',
       lowStockThreshold: 'low_stock_threshold',
@@ -240,7 +310,9 @@ export default async function itemRoutes(app) {
     for (const [field, column] of Object.entries(map)) {
       if (body[field] === undefined) continue;
       sets.push(`${column} = ?`);
-      params.push(field === 'aliases' ? JSON.stringify(body[field] ?? []) : body[field]);
+      if (field === 'aliases') params.push(JSON.stringify(body[field] ?? []));
+      else if (field === 'barcode') params.push(code.value);
+      else params.push(body[field]);
     }
     if (!sets.length) return { ok: true };
 
@@ -248,7 +320,7 @@ export default async function itemRoutes(app) {
     try {
       await query(`UPDATE item SET ${sets.join(', ')} WHERE id = ? AND tenant_id = ?`, params);
     } catch (err) {
-      if (err.code === 'ER_DUP_ENTRY') return fail(reply, 409, 'CONFLICT', '同名同规格的物品已存在');
+      if (err.code === 'ER_DUP_ENTRY') return fail(reply, 409, 'CONFLICT', '同名同规格的物品（或同一条码）已存在');
       throw err;
     }
     return { ok: true };

@@ -40,7 +40,13 @@ server/scripts/db.cmd
 node server/src/index.js
 # → Server listening at https://0.0.0.0:8443
 # → serving web build  {"webDist":"...\\web\\dist"}
+# → http → https redirect on  {"port":8787,"to":8443}
 ```
+
+> `.env` 里的 HTTPS_* 必须留着：手机书签是 `https://192.168.0.101:8443`，
+> 一旦只以 HTTP 起在 8787，手机上就是「无法访问」。
+> 开了 HTTPS 后 8787 会被本进程接管成 301 跳转，电脑上打开旧地址 `http://localhost:8787`
+> 会自动跳到 8443（自签证书首次要点一次「继续前往」，或在电脑上也装上 `certs/ca.crt`）。
 
 本机自检：
 

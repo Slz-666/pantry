@@ -18,6 +18,10 @@
  *               不能再套一个事务，否则就是两个独立事务了）
  */
 import { query, withTransaction } from '../db.js';
+import { closeLowStockAlerts } from './alerts.js';
+
+/** 单次入库上限（PRD 9.2）：超过这个数几乎一定是单位选错（999 盒盐 / 999 吨盐） */
+export const MAX_STOCK_IN = 999;
 
 export class OpError extends Error {
   constructor(status, code, message) {
@@ -135,6 +139,9 @@ export async function stockInTx(conn, { tenantId, memberId, itemId, locationId, 
   const lid = posInt(locationId, 'locationId');
   const q = qty2(qty, 'qty');
   if (Number(q) <= 0) throw new OpError(400, 'BAD_REQUEST', '入库数量必须大于 0');
+  if (Number(q) > MAX_STOCK_IN) {
+    throw new OpError(400, 'BAD_REQUEST', `单次入库最多 ${MAX_STOCK_IN}，这么多是不是单位弄错了？`);
+  }
 
   const [itemRows] = await conn.execute(
     'SELECT id FROM item WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL',
@@ -155,6 +162,9 @@ export async function stockInTx(conn, { tenantId, memberId, itemId, locationId, 
     type: 'in', delta: q, before: '0.00', after: q,
     reason: '手工入库', clientOpId, memberId,
   });
+  // 补货了就把「低库存」提醒关掉：否则买回来之后清单页还在喊缺货，
+  // 用户只能手动去忽略，久了就不信提醒了
+  await closeLowStockAlerts(conn, tenantId, iid);
   return { idempotent: false, logId, batchId, type: 'in', qtyAfter: Number(q) };
 }
 
